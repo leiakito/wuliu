@@ -1,0 +1,164 @@
+:root {
+  --primary-color: #3d7fff;
+  --sidebar-bg: #0d1027;
+  --page-bg: #f1f4fb;
+  --card-bg: #ffffff;
+  --text-muted: #8b98b1;
+  --border-color: #e5e9f2;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body,
+html,
+#app {
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+  font-family: 'SF Pro Display', 'PingFang SC', 'Segoe UI', sans-serif;
+  background-color: var(--page-bg);
+  color: #1f2d3d;
+}
+
+.el-card {
+  border: none;
+  border-radius: 16px;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
+}
+
+.page {
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.page-header h2 {
+  margin: 0;
+  font-size: 24px;
+}
+
+.page-header .sub {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+}
+
+.page-header .actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.page .el-card {
+  background: var(--card-bg);
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+}
+
+.stat-card {
+  padding: 18px 20px;
+  color: #fff;
+  border-radius: 18px;
+  position: relative;
+  overflow: hidden;
+}
+
+.stat-card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at top right, rgba(255, 255, 255, 0.25), transparent 55%);
+}
+
+.stat-card .label {
+  margin: 0;
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.stat-card .value {
+  margin: 8px 0 0;
+  font-size: 32px;
+  font-weight: 600;
+}
+
+.filter-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+}
+
+.batch-card textarea,
+.filter-form .el-input,
+.filter-form .el-select,
+.filter-form .el-date-editor {
+  width: 220px;
+  max-width: 100%;
+}
+
+.table-card {
+  overflow: hidden;
+}
+
+.batch-card .batch-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 220px;
+  gap: 16px;
+  align-items: stretch;
+}
+
+.batch-card .el-input-number {
+  width: 100%;
+}
+
+.section-title {
+  font-size: 18px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+@media (max-width: 992px) {
+  .page {
+    padding: 12px;
+  }
+
+  .filter-form {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .page-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .page-header .actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .batch-card .batch-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 600px) {
+  .stat-card .value {
+    font-size: 26px;
+  }
+}
