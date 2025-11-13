@@ -134,12 +134,12 @@
               <div class="amount-cell">
                 <span class="currency-label">￥</span>
                 <el-input-number
-                  v-model="editableAmount[row.id]"
+                  v-model="row.amount"
                   :min="0"
                   :step="10"
                   size="small"
                   controls-position="right"
-                  @change="value => changeAmount(row, value as number)"
+                  @change="(value, oldValue) => changeAmount(row, value as number, oldValue as number)"
                 />
               </div>
             </template>
@@ -208,9 +208,6 @@
         </el-form-item>
         <el-form-item label="SN">
           <el-input v-model="createForm.sn" />
-        </el-form-item>
-        <el-form-item label="金额">
-          <el-input-number v-model="createForm.amount" :min="0" :step="10" />
         </el-form-item>
         <el-form-item label="备注">
           <el-input v-model="createForm.remark" type="textarea" :rows="3" />
@@ -341,7 +338,6 @@ const createForm = reactive<OrderCreateRequest>({
   model: '',
   sn: '',
   remark: '',
-  amount: undefined,
   currency: 'CNY',
   orderTime: undefined
 });
@@ -369,7 +365,6 @@ const statusTagType = (value?: string) => {
   const match = statusOptions.find(item => item.value === value);
   return (match?.tag as string) ?? 'info';
 };
-const editableAmount = reactive<Record<number, number | undefined>>({});
 const formatAmountValue = (value?: number) => {
   if (value === undefined || value === null) {
     return '-';
@@ -432,9 +427,6 @@ const loadOrders = async () => {
     const data = await fetchOrders(queryParams.value);
     orders.value = data.records;
     total.value = data.total;
-    orders.value.forEach(order => {
-      editableAmount[order.id] = order.amount;
-    });
     await loadCategoryStats();
   } finally {
     loading.value = false;
@@ -574,15 +566,16 @@ const formatDateTime = (value?: string) => {
   return value.replace('T', ' ').replace('Z', '');
 };
 
-const changeAmount = async (row: OrderRecord, value: number) => {
+const changeAmount = async (row: OrderRecord, value: number, previous?: number) => {
   if (!isAdmin.value || Number.isNaN(value)) return;
-  editableAmount[row.id] = value;
+  const oldValue = previous ?? row.amount ?? 0;
   try {
     await updateOrderAmount(row.id, { amount: value });
     row.amount = value;
     row.currency = 'CNY';
     ElMessage.success('金额已更新');
   } catch (error) {
+    row.amount = oldValue;
     console.error(error);
   }
 };
@@ -603,7 +596,6 @@ const submitEdit = async () => {
     const target = orders.value.find(order => order.id === editDialog.targetId);
     if (target) {
       Object.assign(target, updated);
-      editableAmount[target.id] = target.amount;
     }
     editDialog.visible = false;
     ElMessage.success('已更新');

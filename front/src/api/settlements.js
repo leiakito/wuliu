@@ -19,7 +19,6 @@ const serializeParams = (params) => {
     return search.toString();
 };
 export const fetchSettlements = (params) => apiClient.get('/settlements', { params });
-export const generateSettlement = (payload) => apiClient.post('/settlements/generate', payload);
 export const confirmSettlement = (id, payload) => apiClient.put(`/settlements/${id}/confirm`, payload);
 export const deleteSettlements = (ids) => apiClient.delete('/settlements', { data: ids });
 export const exportSettlements = async (params) => {

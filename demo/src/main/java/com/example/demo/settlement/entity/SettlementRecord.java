@@ -18,6 +18,7 @@ public class SettlementRecord {
     private Long id;
     private Long orderId;
     private String trackingNumber;
+    private String model;
     private BigDecimal amount;
     private String currency;
     private Boolean manualInput;
@@ -30,6 +31,8 @@ public class SettlementRecord {
     private LocalDateTime updatedAt;
     @TableLogic
     private Integer deleted;
+    private String confirmedBy;
+    private LocalDateTime confirmedAt;
 
     @TableField(exist = false)
     private String orderStatus;

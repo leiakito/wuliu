@@ -3,7 +3,6 @@ import type {
   PageResponse,
   SettlementRecord,
   SettlementFilterRequest,
-  SettlementGenerateRequest,
   SettlementConfirmRequest,
   SettlementExportRequest
 } from '@/types/models';
@@ -29,9 +28,6 @@ const serializeParams = (params: SettlementExportRequest) => {
 
 export const fetchSettlements = (params: SettlementFilterRequest) =>
   apiClient.get<PageResponse<SettlementRecord>>('/settlements', { params });
-
-export const generateSettlement = (payload: SettlementGenerateRequest) =>
-  apiClient.post<SettlementRecord[]>('/settlements/generate', payload);
 
 export const confirmSettlement = (id: number, payload: SettlementConfirmRequest) =>
   apiClient.put<void>(`/settlements/${id}/confirm`, payload);

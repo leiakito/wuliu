@@ -118,25 +118,27 @@ public final class ExcelHelper {
             Sheet sheet = workbook.createSheet("待结账");
             Row header = sheet.createRow(0);
             header.createCell(0).setCellValue("单号");
-            header.createCell(1).setCellValue("金额");
-            header.createCell(2).setCellValue("币种");
-            header.createCell(3).setCellValue("状态");
-            header.createCell(4).setCellValue("批次");
-            header.createCell(5).setCellValue("应付日期");
-            header.createCell(6).setCellValue("备注");
+            header.createCell(1).setCellValue("型号");
+            header.createCell(2).setCellValue("金额");
+            header.createCell(3).setCellValue("币种");
+            header.createCell(4).setCellValue("状态");
+            header.createCell(5).setCellValue("批次");
+            header.createCell(6).setCellValue("应付日期");
+            header.createCell(7).setCellValue("备注");
 
             for (int i = 0; i < records.size(); i++) {
                 SettlementRecord record = records.get(i);
                 Row row = sheet.createRow(i + 1);
                 row.createCell(0).setCellValue(safe(record.getTrackingNumber()));
-                row.createCell(1).setCellValue(record.getAmount() == null ? 0 : record.getAmount().doubleValue());
-                row.createCell(2).setCellValue(safe(record.getCurrency()));
-                row.createCell(3).setCellValue(safe(record.getStatus()));
-                row.createCell(4).setCellValue(safe(record.getSettleBatch()));
-                row.createCell(5).setCellValue(record.getPayableAt() == null ? "" : record.getPayableAt().toString());
-                row.createCell(6).setCellValue(safe(record.getRemark()));
+                row.createCell(1).setCellValue(safe(record.getModel()));
+                row.createCell(2).setCellValue(record.getAmount() == null ? 0 : record.getAmount().doubleValue());
+                row.createCell(3).setCellValue(safe(record.getCurrency()));
+                row.createCell(4).setCellValue(safe(record.getStatus()));
+                row.createCell(5).setCellValue(safe(record.getSettleBatch()));
+                row.createCell(6).setCellValue(record.getPayableAt() == null ? "" : record.getPayableAt().toString());
+                row.createCell(7).setCellValue(safe(record.getRemark()));
             }
-            for (int c = 0; c <= 6; c++) {
+            for (int c = 0; c <= 7; c++) {
                 sheet.autoSizeColumn(c);
             }
             workbook.write(baos);

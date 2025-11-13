@@ -7,23 +7,16 @@ import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.example.demo.common.annotation.LogOperation;
 import com.example.demo.common.response.ApiResponse;
 import com.example.demo.common.response.PageResponse;
-import com.example.demo.order.dto.BatchFetchRequest;
-import com.example.demo.order.entity.OrderRecord;
-import com.example.demo.order.service.OrderService;
 import com.example.demo.settlement.dto.SettlementConfirmRequest;
 import com.example.demo.settlement.dto.SettlementExportRequest;
 import com.example.demo.settlement.dto.SettlementFilterRequest;
-import com.example.demo.settlement.dto.SettlementGenerateRequest;
 import com.example.demo.settlement.entity.SettlementRecord;
 import com.example.demo.settlement.service.SettlementService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
-import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
-import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -45,26 +38,6 @@ import org.springframework.web.bind.annotation.RestController;
 public class SettlementController {
 
     private final SettlementService settlementService;
-    private final OrderService orderService;
-
-    @PostMapping("/generate")
-    @SaCheckLogin
-    @LogOperation("生成待结账")
-    @Operation(summary = "生成待结账", description = "根据单号列表生成待结账数据，缺失的单号会自动抓取")
-    public ApiResponse<List<SettlementRecord>> generate(@Valid @RequestBody SettlementGenerateRequest request) {
-        String operator = StpUtil.getLoginIdAsString();
-        List<OrderRecord> orders = new ArrayList<>(orderService.findByTracking(request.getTrackingNumbers()));
-        Set<String> found = orders.stream().map(OrderRecord::getTrackingNumber).collect(Collectors.toSet());
-        List<String> missing = request.getTrackingNumbers().stream()
-            .filter(num -> !found.contains(num))
-            .collect(Collectors.toList());
-        if (!missing.isEmpty()) {
-            BatchFetchRequest fetchRequest = new BatchFetchRequest();
-            fetchRequest.setTrackingNumbers(missing);
-            orders.addAll(orderService.syncFromThirdParty(fetchRequest, operator));
-        }
-        return ApiResponse.ok(settlementService.createPending(orders, true));
-    }
 
     @GetMapping
     @SaCheckLogin
@@ -81,7 +54,7 @@ public class SettlementController {
     public ApiResponse<Void> confirm(
         @Parameter(description = "待确认的结算记录 ID", required = true) @PathVariable Long id,
         @Valid @RequestBody SettlementConfirmRequest request) {
-        settlementService.confirm(id, request);
+        settlementService.confirm(id, request, StpUtil.getLoginIdAsString());
         return ApiResponse.ok();
     }
 

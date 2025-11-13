@@ -14,7 +14,7 @@ public interface SettlementService {
 
     IPage<SettlementRecord> list(SettlementFilterRequest request);
 
-    void confirm(Long id, SettlementConfirmRequest request);
+    void confirm(Long id, SettlementConfirmRequest request, String operator);
 
     byte[] export(SettlementExportRequest request);
 

@@ -2,8 +2,8 @@
   <div class="page">
     <div class="hero">
       <div>
-        <h2>物流单号快速查询</h2>
-        <p class="sub">输入运单号即可查询是否已录入、打款或收货</p>
+        <h2>单号总查询</h2>
+        <p class="sub">统一查询所有物流单的录入、打款与收货状态</p>
       </div>
       <el-button v-if="isAdmin" type="primary" @click="goOrders">前往订单管理</el-button>
     </div>

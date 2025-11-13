@@ -7,7 +7,6 @@
       </div>
       <div class="actions">
         <el-button @click="exportData" :loading="exporting">导出 Excel</el-button>
-        <el-button type="primary" @click="openGenerateDialog">生成待结账</el-button>
         <el-button
           v-if="isAdmin"
           type="danger"
@@ -51,6 +50,9 @@
       <el-table :data="records" v-loading="loading" height="520" @selection-change="handleSelection">
         <el-table-column type="selection" width="48" />
         <el-table-column prop="trackingNumber" label="单号" width="160" />
+        <el-table-column prop="model" label="型号" width="160">
+          <template #default="{ row }">{{ row.model || '-' }}</template>
+        </el-table-column>
         <el-table-column prop="amount" label="金额" width="120">
           <template #default="{ row }">{{ row.amount ?? '-' }} {{ row.currency }}</template>
         </el-table-column>
@@ -99,23 +101,6 @@
       />
     </el-card>
 
-    <el-dialog v-model="generateDialog" title="生成待结账" width="600px">
-      <el-form label-width="120px">
-        <el-form-item label="单号列表">
-          <el-input
-            v-model="generateNumbers"
-            type="textarea"
-            :rows="4"
-            placeholder="每行一个单号"
-          />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="generateDialog = false">取消</el-button>
-        <el-button type="primary" :loading="generateLoading" @click="handleGenerate">生成</el-button>
-      </template>
-    </el-dialog>
-
     <el-dialog v-model="confirmDialog.visible" title="确认结账" width="480px">
       <el-form label-width="100px">
         <el-form-item label="金额">
@@ -138,7 +123,6 @@ import { reactive, ref, computed } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import {
   fetchSettlements,
-  generateSettlement,
   confirmSettlement,
   deleteSettlements,
   exportSettlements
@@ -177,9 +161,6 @@ const exporting = ref(false);
 const selectedIds = ref<number[]>([]);
 const selectedRecords = ref<SettlementRecord[]>([]);
 
-const generateDialog = ref(false);
-const generateNumbers = ref('');
-const generateLoading = ref(false);
 
 const confirmDialog = reactive({
   visible: false,
@@ -235,39 +216,6 @@ const handlePageChange = (page: number) => {
 const handleSelection = (rows: SettlementRecord[]) => {
   selectedRecords.value = rows;
   selectedIds.value = rows.map(row => row.id);
-};
-
-const openGenerateDialog = () => {
-  const numbers = (selectedRecords.value.length ? selectedRecords.value : records.value.filter(item => item.status === 'PENDING'))
-    .map(item => item.trackingNumber)
-    .filter(Boolean);
-  generateNumbers.value = numbers.join('\n');
-  if (!numbers.length) {
-    ElMessage.info('暂无可用的待结账单号，请先选择或筛选记录');
-  }
-  generateDialog.value = true;
-};
-
-const handleGenerate = async () => {
-  const tracking = generateNumbers.value
-    .split(/\n|,|;/)
-    .map(item => item.trim())
-    .filter(Boolean);
-  if (!tracking.length) {
-    ElMessage.warning('请输入单号');
-    return;
-  }
-  generateLoading.value = true;
-  try {
-    await generateSettlement({ trackingNumbers: tracking });
-    ElMessage.success('生成成功，正在写入 Excel');
-    generateDialog.value = false;
-    generateNumbers.value = '';
-    loadData();
-    await downloadExcel({ trackingNumbers: tracking }, 'pending-settlements.xlsx');
-  } finally {
-    generateLoading.value = false;
-  }
 };
 
 const openConfirm = (row: SettlementRecord) => {

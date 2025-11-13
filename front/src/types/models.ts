@@ -89,6 +89,7 @@ export interface SettlementRecord {
   id: number;
   orderId?: number;
   trackingNumber: string;
+  model?: string;
   amount?: number;
   currency?: string;
   manualInput?: boolean;
@@ -98,6 +99,8 @@ export interface SettlementRecord {
   payableAt?: string;
   remark?: string;
   createdAt?: string;
+  orderStatus?: string;
+  orderAmount?: number;
 }
 
 export interface OrderCategoryStats {
@@ -117,10 +120,6 @@ export interface SettlementFilterRequest {
 export interface SettlementConfirmRequest {
   amount: number;
   remark?: string;
-}
-
-export interface SettlementGenerateRequest {
-  trackingNumbers: string[];
 }
 
 export interface SettlementExportRequest {
@@ -169,6 +168,19 @@ export interface SysLog {
   createdAt: string;
 }
 
+export interface Announcement {
+  id: number;
+  title: string;
+  content: string;
+  createdBy?: string;
+  createdAt: string;
+}
+
+export interface AnnouncementCreateRequest {
+  title: string;
+  content: string;
+}
+
 export interface UserSubmission {
   id: number;
   username: string;
@@ -178,13 +190,11 @@ export interface UserSubmission {
   submissionDate?: string;
   remark?: string;
   createdAt?: string;
+  order?: OrderRecord;
 }
 
 export interface UserSubmissionCreateRequest {
   trackingNumber: string;
-  amount?: number;
-  submissionDate?: string;
-  remark?: string;
 }
 
 export interface UserSubmissionQueryRequest {

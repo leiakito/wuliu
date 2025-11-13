@@ -18,6 +18,8 @@ import com.example.demo.order.mapper.OrderRecordMapper;
 import com.example.demo.order.util.TrackingCategoryUtil;
 import com.example.demo.order.service.OrderService;
 import com.example.demo.settlement.service.SettlementService;
+import com.example.demo.submission.entity.UserSubmission;
+import com.example.demo.submission.mapper.UserSubmissionMapper;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -41,20 +43,27 @@ public class OrderServiceImpl implements OrderService {
 
     private final OrderRecordMapper orderRecordMapper;
     private final SettlementService settlementService;
+    private final UserSubmissionMapper userSubmissionMapper;
 
     @Override
     @Transactional
     public void importOrders(MultipartFile file, String operator) {
         try {
             List<OrderRecord> records = ExcelHelper.readOrders(file.getInputStream(), operator);
+            List<OrderRecord> needSettlement = new ArrayList<>();
             for (OrderRecord record : records) {
                 record.setImported(Boolean.TRUE);
                 if (record.getTrackingNumber() != null) {
                     record.setCategory(TrackingCategoryUtil.resolve(record.getTrackingNumber()));
                 }
                 upsertBySn(record);
+                if (hasSubmission(record.getTrackingNumber())) {
+                    needSettlement.add(record);
+                }
             }
-            settlementService.createPending(records, true);
+            if (!needSettlement.isEmpty()) {
+                settlementService.createPending(needSettlement, true);
+            }
         } catch (IOException e) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "Excel 解析失败");
         }
@@ -117,7 +126,9 @@ public class OrderServiceImpl implements OrderService {
         record.setCreatedBy(operator);
         record.setImported(Boolean.TRUE);
         orderRecordMapper.insert(record);
-        settlementService.createPending(List.of(record), true);
+        if (hasSubmission(record.getTrackingNumber())) {
+            settlementService.createPending(List.of(record), true);
+        }
         return record;
     }
 
@@ -201,7 +212,9 @@ public class OrderServiceImpl implements OrderService {
             existNumbers.add(tracking);
             created.add(record);
         }
-        settlementService.createPending(created, true);
+        if (!created.isEmpty()) {
+            settlementService.createPending(created, true);
+        }
         return created;
     }
 
@@ -286,5 +299,15 @@ public class OrderServiceImpl implements OrderService {
             incoming.setId(existed.getId());
             orderRecordMapper.updateById(incoming);
         }
+    }
+
+    private boolean hasSubmission(String trackingNumber) {
+        if (!StringUtils.hasText(trackingNumber)) {
+            return false;
+        }
+        LambdaQueryWrapper<UserSubmission> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(UserSubmission::getTrackingNumber, trackingNumber.trim())
+            .ne(UserSubmission::getStatus, "COMPLETED");
+        return userSubmissionMapper.selectCount(wrapper) > 0;
     }
 }

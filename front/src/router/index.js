@@ -17,13 +17,19 @@ const routes = [
                 path: 'dashboard',
                 name: 'dashboard',
                 component: () => import('@/views/DashboardView.vue'),
-                meta: { requiresAuth: true, title: '仪表盘' }
+                meta: { requiresAuth: true, title: '单号总查询' }
             },
             {
                 path: 'orders',
                 name: 'orders',
                 component: () => import('@/views/OrdersView.vue'),
-                meta: { requiresAuth: true, title: '物流单号' }
+                meta: { requiresAuth: true, title: '物流单号', roles: ['ADMIN'] }
+            },
+            {
+                path: 'announcements',
+                name: 'announcements',
+                component: () => import('@/views/AnnouncementsView.vue'),
+                meta: { requiresAuth: true, title: '系统公告' }
             },
             {
                 path: 'user-submissions',

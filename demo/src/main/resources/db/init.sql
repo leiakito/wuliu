@@ -1,136 +1,173 @@
--- Logistics billing schema & seed data (MySQL 8+)
+    -- Logistics billing schema & seed data (MySQL 8+)
 
--- 创建数据库（如果不存在）
-CREATE DATABASE IF NOT EXISTS logistics CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+    -- 创建数据库（如果不存在）
+    CREATE DATABASE IF NOT EXISTS logistics CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- 选择数据库
-USE logistics;
+    -- 选择数据库
+    USE logistics;
 
--- 删除旧表（注意依赖顺序）
-DROP TABLE IF EXISTS settlement_record;
-DROP TABLE IF EXISTS order_record;
-DROP TABLE IF EXISTS sys_log;
-DROP TABLE IF EXISTS sys_user;
+    -- 删除旧表（注意依赖顺序）
+    DROP TABLE IF EXISTS announcement;
+    DROP TABLE IF EXISTS settlement_record;
+    DROP TABLE IF EXISTS user_submission;
+    DROP TABLE IF EXISTS hardware_price;
+    DROP TABLE IF EXISTS order_record;
+    DROP TABLE IF EXISTS sys_log;
+    DROP TABLE IF EXISTS sys_user;
 
--- 用户表
-CREATE TABLE sys_user (
-                          id           BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
-                          username     VARCHAR(64)     NOT NULL UNIQUE,
-                          password     VARCHAR(255)    NOT NULL COMMENT 'BCrypt 密码',
-                          role         VARCHAR(32)     NOT NULL,
-                          status       VARCHAR(16)     NOT NULL DEFAULT 'ENABLED',
-                          full_name    VARCHAR(64),
-                          last_login   DATETIME,
-                          created_at   DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                          updated_at   DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                          deleted      TINYINT         NOT NULL DEFAULT 0
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    -- 用户表
+    CREATE TABLE sys_user (
+                              id           BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                              username     VARCHAR(64)     NOT NULL UNIQUE,
+                              password     VARCHAR(255)    NOT NULL COMMENT 'BCrypt 密码',
+                              role         VARCHAR(32)     NOT NULL,
+                              status       VARCHAR(16)     NOT NULL DEFAULT 'ENABLED',
+                              full_name    VARCHAR(64),
+                              last_login   DATETIME,
+                              created_at   DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                              updated_at   DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                              deleted      TINYINT         NOT NULL DEFAULT 0
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- 订单表
-CREATE TABLE order_record (
-                              id              BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
-                              order_date      DATE,
-                              order_time      DATETIME,
-                              tracking_number VARCHAR(64)     NOT NULL,
-                              model           VARCHAR(64),
-                              sn              VARCHAR(64)     NOT NULL,
-                              remark          VARCHAR(255),
-                              category        VARCHAR(64),
-                              status          VARCHAR(32),
-                              amount          DECIMAL(15,2),
-                              currency        VARCHAR(16),
-                              weight          DECIMAL(10,2),
-                              customer_name   VARCHAR(64),
-                              created_by      VARCHAR(64),
-                              updated_by      VARCHAR(64),
-                              imported        TINYINT         NOT NULL DEFAULT 1,
-                              created_at      DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                              updated_at      DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                              deleted         TINYINT         NOT NULL DEFAULT 0,
-                              UNIQUE KEY uk_order_sn(sn),
-                              INDEX idx_order_date(order_date),
-                              INDEX idx_order_status(status)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    -- 订单表
+    CREATE TABLE order_record (
+                                  id              BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                                  order_date      DATE,
+                                  order_time      DATETIME,
+                                  tracking_number VARCHAR(64)     NOT NULL,
+                                  model           VARCHAR(64),
+                                  sn              VARCHAR(64)     NOT NULL,
+                                  remark          VARCHAR(255),
+                                  category        VARCHAR(64),
+                                  status          VARCHAR(32),
+                                  amount          DECIMAL(15,2),
+                                  currency        VARCHAR(16),
+                                  weight          DECIMAL(10,2),
+                                  customer_name   VARCHAR(64),
+                                  created_by      VARCHAR(64),
+                                  updated_by      VARCHAR(64),
+                                  imported        TINYINT         NOT NULL DEFAULT 1,
+                                  created_at      DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                                  updated_at      DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                                  deleted         TINYINT         NOT NULL DEFAULT 0,
+                                  UNIQUE KEY uk_order_sn(sn),
+                                  INDEX idx_order_date(order_date),
+                                  INDEX idx_order_status(status)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- 硬件价格表
-CREATE TABLE hardware_price (
-                                id           BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
-                                price_date   DATE            NOT NULL,
-                                item_name    VARCHAR(128)    NOT NULL,
-                                category     VARCHAR(64),
-                                price        DECIMAL(15,2)   NOT NULL,
-                                remark       VARCHAR(255),
-                                created_by   VARCHAR(64),
-                                created_at   DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                                updated_at   DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                                deleted      TINYINT         NOT NULL DEFAULT 0,
-                                UNIQUE KEY uk_price_date_item(price_date, item_name),
-                                INDEX idx_price_date(price_date)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    -- 用户提交单号表
+    CREATE TABLE user_submission (
+                                     id               BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                                     username         VARCHAR(64)     NOT NULL,
+                                     tracking_number  VARCHAR(64)     NOT NULL,
+                                     status           VARCHAR(32)     NOT NULL DEFAULT 'PENDING',
+                                     amount           DECIMAL(15,2),
+                                     submission_date  DATE,
+                                     remark           VARCHAR(255),
+                                     created_at       DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                                     updated_at       DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                                     deleted          TINYINT         NOT NULL DEFAULT 0,
+                                     UNIQUE KEY uk_submission_tracking(tracking_number),
+                                     INDEX idx_submission_status(status),
+                                     INDEX idx_submission_date(submission_date)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- 结账记录表
-CREATE TABLE settlement_record (
-                                   id              BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
-                                   order_id        BIGINT UNSIGNED,
-                                   tracking_number VARCHAR(64)    NOT NULL,
-                                   amount          DECIMAL(15,2),
-                                   currency        VARCHAR(16),
-                                   manual_input    TINYINT         NOT NULL DEFAULT 0,
-                                   status          VARCHAR(32),
-                                   warning         TINYINT         NOT NULL DEFAULT 0,
-                                   settle_batch    VARCHAR(64),
-                                   payable_at      DATE,
-                                   remark          VARCHAR(255),
-                                   created_at      DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                                   updated_at      DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                                   deleted         TINYINT         NOT NULL DEFAULT 0,
-                                   INDEX idx_settle_batch(settle_batch),
-                                   INDEX idx_settle_status(status),
-                                   CONSTRAINT fk_settlement_order FOREIGN KEY (order_id) REFERENCES order_record(id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    -- 硬件价格表
+    CREATE TABLE hardware_price (
+                                    id           BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                                    price_date   DATE            NOT NULL,
+                                    item_name    VARCHAR(128)    NOT NULL,
+                                    category     VARCHAR(64),
+                                    price        DECIMAL(15,2)   NOT NULL,
+                                    remark       VARCHAR(255),
+                                    created_by   VARCHAR(64),
+                                    created_at   DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                                    updated_at   DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                                    deleted      TINYINT         NOT NULL DEFAULT 0,
+                                    UNIQUE KEY uk_price_date_item(price_date, item_name),
+                                    INDEX idx_price_date(price_date)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- 操作日志表
-CREATE TABLE sys_log (
-                         id         BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
-                         username   VARCHAR(64),
-                         action     VARCHAR(64),
-                         detail     VARCHAR(512),
-                         ip         VARCHAR(48),
-                         created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                         INDEX idx_sys_log_username(username)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    -- 结账记录表
+    CREATE TABLE settlement_record (
+                                       id              BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                                       order_id        BIGINT UNSIGNED,
+                                       tracking_number VARCHAR(64)    NOT NULL,
+                                       model           VARCHAR(128),
+                                       amount          DECIMAL(15,2),
+                                       currency        VARCHAR(16),
+                                       manual_input    TINYINT         NOT NULL DEFAULT 0,
+                                       status          VARCHAR(32),
+                                       warning         TINYINT         NOT NULL DEFAULT 0,
+                                       settle_batch    VARCHAR(64),
+                                       payable_at      DATE,
+                                       remark          VARCHAR(255),
+                                       confirmed_by    VARCHAR(64),
+                                       confirmed_at    DATETIME,
+                                       created_at      DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                                       updated_at      DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                                       deleted         TINYINT         NOT NULL DEFAULT 0,
+                                       INDEX idx_settle_batch(settle_batch),
+                                       INDEX idx_settle_status(status),
+                                       CONSTRAINT fk_settlement_order FOREIGN KEY (order_id) REFERENCES order_record(id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- 初始用户数据（密码: admin123 / operator123，对应 BCrypt 密文）
-INSERT INTO sys_user (username, password, role, status, full_name)
-VALUES
-    ('admin', '$2y$10$46TOaWf6.9LibwU9HD/YpOdRYB2LxMP31TutDnPVkvrYg9G/15kk2', 'ADMIN', 'ENABLED', '系统管理员'),
-    ('operator', '$2y$10$/wsz6itJhMn8MvHRVarZFurfAsbIRpVlCnfoLTvx0oCeiyaGEakey', 'USER', 'ENABLED', '普通用户');
+    -- 操作日志表
+    CREATE TABLE sys_log (
+                             id         BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                             username   VARCHAR(64),
+                             action     VARCHAR(64),
+                             detail     VARCHAR(512),
+                             ip         VARCHAR(48),
+                             created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                             INDEX idx_sys_log_username(username)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- 初始订单样例
-INSERT INTO order_record (order_date, order_time, tracking_number, model, sn, remark, category, status, amount, currency, weight, customer_name, created_by, imported)
-VALUES
-    (DATE_SUB(CURDATE(), INTERVAL 2 DAY), DATE_SUB(NOW(), INTERVAL 2 DAY), 'SF1234567890', 'iPhone 15', 'SN-001', '自动导入样例', '手机', 'UNPAID', 120.00, 'CNY', 0.45, '张三', 'admin', 1),
-    (DATE_SUB(CURDATE(), INTERVAL 1 DAY), DATE_SUB(NOW(), INTERVAL 1 DAY), 'YTO9876543210', 'iPad Pro', 'SN-002', '手动录入', '平板', 'NOT_RECEIVED', 215.00, 'CNY', 0.8, '李四', 'operator', 1),
-    (CURDATE(), NOW(), 'DHL0000000001', 'MacBook Air', 'SN-003', '海外渠道', '电脑', 'PAID', 650.00, 'USD', 1.2, 'ACME HK', 'admin', 1);
+    -- 公告表
+    CREATE TABLE announcement (
+                                  id          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                                  title       VARCHAR(128)    NOT NULL,
+                                  content     TEXT            NOT NULL,
+                                  created_by  VARCHAR(64),
+                                  created_at  DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- 硬件价格样例
-INSERT INTO hardware_price (price_date, item_name, category, price, remark, created_by)
-VALUES
-    (CURRENT_DATE, 'CPU i9-14900K', 'CPU', 4299.00, '盒装原厂', 'admin'),
-    (CURRENT_DATE, 'GPU RTX 4090', 'GPU', 12999.00, '旗舰显卡', 'admin'),
-    (CURRENT_DATE, '技嘉 Z890 主板', '主板', 2599.00, 'WiFi 版本', 'admin'),
-    (DATE_SUB(CURRENT_DATE, INTERVAL 1 DAY), 'CPU i9-14900K', 'CPU', 4399.00, '昨日报价', 'admin');
+    -- 初始用户数据（密码: admin123 / operator123，对应 BCrypt 密文）
+    INSERT INTO sys_user (username, password, role, status, full_name)
+    VALUES
+        ('admin', '$2y$10$46TOaWf6.9LibwU9HD/YpOdRYB2LxMP31TutDnPVkvrYg9G/15kk2', 'ADMIN', 'ENABLED', '系统管理员'),
+        ('operator', '$2y$10$/wsz6itJhMn8MvHRVarZFurfAsbIRpVlCnfoLTvx0oCeiyaGEakey', 'USER', 'ENABLED', '普通用户');
 
--- 订单对应的结账数据
-INSERT INTO settlement_record (order_id, tracking_number, amount, currency, manual_input, status, warning, settle_batch, payable_at, remark)
-VALUES
-    (1, 'SF1234567890', 120.00, 'CNY', 0, 'PENDING', 0, NULL, NULL, '自动待结账'),
-    (2, 'YTO9876543210', 215.00, 'CNY', 0, 'PENDING', 0, NULL, NULL, '等待财务确认'),
-    (3, 'DHL0000000001', 650.00, 'USD', 1, 'CONFIRMED', 0, CONCAT('BATCH-', DATE_FORMAT(CURDATE(), '%Y%m%d')), CURDATE(), '人工确认');
+    # -- 初始订单样例
+    # INSERT INTO order_record (order_date, order_time, tracking_number, model, sn, remark, category, status, amount, currency, weight, customer_name, created_by, imported)
+    # VALUES
+    #     (DATE_SUB(CURDATE(), INTERVAL 2 DAY), DATE_SUB(NOW(), INTERVAL 2 DAY), 'SF1234567890', 'iPhone 15', 'SN-001', '自动导入样例', '手机', 'UNPAID', 120.00, 'CNY', 0.45, '张三', 'admin', 1),
+    #     (DATE_SUB(CURDATE(), INTERVAL 1 DAY), DATE_SUB(NOW(), INTERVAL 1 DAY), 'YTO9876543210', 'iPad Pro', 'SN-002', '手动录入', '平板', 'NOT_RECEIVED', 215.00, 'CNY', 0.8, '李四', 'operator', 1),
+    #     (CURDATE(), NOW(), 'DHL0000000001', 'MacBook Air', 'SN-003', '海外渠道', '电脑', 'PAID', 650.00, 'USD', 1.2, 'ACME HK', 'admin', 1);
 
--- 日志样例
-INSERT INTO sys_log (username, action, detail, ip)
-VALUES
-    ('admin', 'LOGIN', '管理员登录系统', '127.0.0.1'),
-    ('admin', 'IMPORT_ORDER', '批量导入 50 条订单', '127.0.0.1'),
-    ('operator', 'GENERATE_SETTLEMENT', '生成 2 条待结账', '127.0.0.1');
+    -- 硬件价格样例
+    INSERT INTO hardware_price (price_date, item_name, category, price, remark, created_by)
+    VALUES
+        (CURRENT_DATE, 'CPU i9-14900K', 'CPU', 4299.00, '盒装原厂', 'admin'),
+        (CURRENT_DATE, 'GPU RTX 4090', 'GPU', 12999.00, '旗舰显卡', 'admin'),
+        (CURRENT_DATE, '技嘉 Z890 主板', '主板', 2599.00, 'WiFi 版本', 'admin'),
+        (DATE_SUB(CURRENT_DATE, INTERVAL 1 DAY), 'CPU i9-14900K', 'CPU', 4399.00, '昨日报价', 'admin');
+
+    # -- 订单对应的结账数据
+    # INSERT INTO settlement_record (order_id, tracking_number, model, amount, currency, manual_input, status, warning, settle_batch, payable_at, remark)
+    # VALUES
+    #     (1, 'SF1234567890', 'iPhone 15', 120.00, 'CNY', 0, 'PENDING', 0, NULL, NULL, '自动待结账'),
+    #     (2, 'YTO9876543210', 'iPad Pro', 215.00, 'CNY', 0, 'PENDING', 0, NULL, NULL, '等待财务确认'),
+    #     (3, 'DHL0000000001', 'MacBook Air', 650.00, 'USD', 1, 'CONFIRMED', 0, CONCAT('BATCH-', DATE_FORMAT(CURDATE(), '%Y%m%d')), CURDATE(), '人工确认');
+
+    -- 日志样例
+    INSERT INTO sys_log (username, action, detail, ip)
+    VALUES
+        ('admin', 'LOGIN', '管理员登录系统', '127.0.0.1'),
+        ('admin', 'IMPORT_ORDER', '批量导入 50 条订单', '127.0.0.1'),
+        ('operator', 'GENERATE_SETTLEMENT', '生成 2 条待结账', '127.0.0.1');
+
+    -- 公告样例
+    INSERT INTO announcement (title, content, created_by)
+    VALUES
+        ('系统维护通知', '本周日 02:00-04:00 将进行系统维护，期间服务暂停，请提前安排相关操作。', 'admin');

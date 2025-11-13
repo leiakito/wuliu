@@ -9,6 +9,8 @@ import com.example.demo.common.util.ExcelHelper;
 import com.example.demo.config.AppProperties;
 import com.example.demo.order.entity.OrderRecord;
 import com.example.demo.order.mapper.OrderRecordMapper;
+import com.example.demo.submission.entity.UserSubmission;
+import com.example.demo.submission.mapper.UserSubmissionMapper;
 import com.example.demo.settlement.dto.SettlementConfirmRequest;
 import com.example.demo.settlement.dto.SettlementExportRequest;
 import com.example.demo.settlement.dto.SettlementFilterRequest;
@@ -16,7 +18,9 @@ import com.example.demo.settlement.entity.SettlementRecord;
 import com.example.demo.settlement.mapper.SettlementRecordMapper;
 import com.example.demo.settlement.service.SettlementService;
 import java.io.IOException;
+import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -26,6 +30,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.CollectionUtils;
+import org.springframework.util.StringUtils;
 
 @Service
 @RequiredArgsConstructor
@@ -33,6 +38,7 @@ public class SettlementServiceImpl implements SettlementService {
 
     private final SettlementRecordMapper settlementRecordMapper;
     private final OrderRecordMapper orderRecordMapper;
+    private final UserSubmissionMapper userSubmissionMapper;
     private final AppProperties appProperties;
 
     @Override
@@ -63,6 +69,7 @@ public class SettlementServiceImpl implements SettlementService {
             SettlementRecord record = new SettlementRecord();
             record.setOrderId(order.getId());
             record.setTrackingNumber(order.getTrackingNumber());
+            record.setModel(order.getModel());
             record.setAmount(order.getAmount());
             record.setCurrency(order.getCurrency());
             record.setStatus("PENDING");
@@ -100,7 +107,7 @@ public class SettlementServiceImpl implements SettlementService {
 
     @Override
     @Transactional
-    public void confirm(Long id, SettlementConfirmRequest request) {
+    public void confirm(Long id, SettlementConfirmRequest request, String operator) {
         SettlementRecord record = settlementRecordMapper.selectById(id);
         if (record == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND, "待结账数据不存在");
@@ -110,7 +117,11 @@ public class SettlementServiceImpl implements SettlementService {
         record.setStatus("CONFIRMED");
         record.setSettleBatch("BATCH-" + LocalDate.now());
         record.setPayableAt(LocalDate.now());
+        record.setConfirmedBy(operator);
+        record.setConfirmedAt(LocalDateTime.now());
         settlementRecordMapper.updateById(record);
+        updateOrderWithSettlement(record, request.getAmount());
+        markSubmissionCompleted(record.getTrackingNumber());
     }
 
     @Override
@@ -166,6 +177,7 @@ public class SettlementServiceImpl implements SettlementService {
             if (order.getTrackingNumber() != null) {
                 record.setTrackingNumber(order.getTrackingNumber());
             }
+            record.setModel(order.getModel());
             record.setAmount(order.getAmount());
             record.setCurrency(order.getCurrency());
             if (order.getRemark() != null) {
@@ -193,7 +205,55 @@ public class SettlementServiceImpl implements SettlementService {
             if (order != null) {
                 record.setOrderStatus(order.getStatus());
                 record.setOrderAmount(order.getAmount());
+                if (!StringUtils.hasText(record.getModel()) && StringUtils.hasText(order.getModel())) {
+                    record.setModel(order.getModel());
+                }
             }
+        });
+    }
+
+    private void updateOrderWithSettlement(SettlementRecord record, BigDecimal amount) {
+        OrderRecord order = null;
+        if (record.getOrderId() != null) {
+            order = orderRecordMapper.selectById(record.getOrderId());
+        }
+        if (order == null && record.getTrackingNumber() != null && !record.getTrackingNumber().isBlank()) {
+            LambdaQueryWrapper<OrderRecord> wrapper = new LambdaQueryWrapper<>();
+            wrapper.eq(OrderRecord::getTrackingNumber, record.getTrackingNumber());
+            order = orderRecordMapper.selectOne(wrapper);
+        }
+        if (order == null) {
+            return;
+        }
+        order.setStatus("PAID");
+        if (amount != null) {
+            order.setAmount(amount);
+        }
+        orderRecordMapper.updateById(order);
+    }
+
+    private void markSubmissionCompleted(String trackingNumber) {
+        if (!StringUtils.hasText(trackingNumber)) {
+            return;
+        }
+        LambdaQueryWrapper<SettlementRecord> pendingQuery = new LambdaQueryWrapper<>();
+        pendingQuery.eq(SettlementRecord::getTrackingNumber, trackingNumber)
+            .ne(SettlementRecord::getStatus, "CONFIRMED");
+        Long remaining = settlementRecordMapper.selectCount(pendingQuery);
+        if (remaining != null && remaining > 0) {
+            return;
+        }
+        LambdaQueryWrapper<UserSubmission> query = new LambdaQueryWrapper<>();
+        query.eq(UserSubmission::getTrackingNumber, trackingNumber)
+            .ne(UserSubmission::getStatus, "COMPLETED");
+        List<UserSubmission> submissions = userSubmissionMapper.selectList(query);
+        if (submissions.isEmpty()) {
+            return;
+        }
+        submissions.forEach(submission -> {
+            submission.setStatus("COMPLETED");
+            submission.setUpdatedAt(LocalDateTime.now());
+            userSubmissionMapper.updateById(submission);
         });
     }
 }
