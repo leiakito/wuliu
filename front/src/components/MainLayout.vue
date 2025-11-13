@@ -54,7 +54,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { Document, House, Tickets, User, Memo, ArrowDown, Menu } from '@element-plus/icons-vue';
+import { Document, House, Tickets, User, Memo, ArrowDown, Menu, EditPen } from '@element-plus/icons-vue';
 import { useAuthStore } from '@/store/auth';
 import SidebarMenu from '@/components/SidebarMenu.vue';
 import type { NavItem } from '@/types/navigation';
@@ -69,6 +69,7 @@ const drawerVisible = ref(false);
 const baseMenus: NavItem[] = [
   { label: '仪表盘', path: '/dashboard', icon: House },
   { label: '物流单号', path: '/orders', icon: Document },
+  { label: '单号提交', path: '/user-submissions', icon: EditPen },
   { label: '硬件价格', path: '/hardware-prices', icon: Tickets },
   { label: '结账管理', path: '/settlements', icon: Tickets, roles: ['ADMIN'] },
   { label: '用户管理', path: '/users', icon: User, roles: ['ADMIN'] },

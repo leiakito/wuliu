@@ -26,6 +26,12 @@ const routes = [
                 meta: { requiresAuth: true, title: '物流单号' }
             },
             {
+                path: 'user-submissions',
+                name: 'user-submissions',
+                component: () => import('@/views/UserSubmissionsView.vue'),
+                meta: { requiresAuth: true, title: '单号提交' }
+            },
+            {
                 path: 'hardware-prices',
                 name: 'hardware-prices',
                 component: () => import('@/views/HardwarePricesView.vue'),

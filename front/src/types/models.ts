@@ -168,3 +168,29 @@ export interface SysLog {
   ip?: string;
   createdAt: string;
 }
+
+export interface UserSubmission {
+  id: number;
+  username: string;
+  trackingNumber: string;
+  status: string;
+  amount?: number;
+  submissionDate?: string;
+  remark?: string;
+  createdAt?: string;
+}
+
+export interface UserSubmissionCreateRequest {
+  trackingNumber: string;
+  amount?: number;
+  submissionDate?: string;
+  remark?: string;
+}
+
+export interface UserSubmissionQueryRequest {
+  page?: number;
+  size?: number;
+  status?: string;
+  username?: string;
+  trackingNumber?: string;
+}
