@@ -155,7 +155,7 @@ public final class ExcelHelper {
     }
 
     private static String readString(Cell cell, String defaultValue) {
-        if (cell == null) {
+        if (cell == null || isErrorCell(cell)) {
             return defaultValue;
         }
         if (isNumericCell(cell)) {
@@ -177,7 +177,7 @@ public final class ExcelHelper {
     }
 
     private static LocalDate parseDate(Cell cell) {
-        if (cell == null) {
+        if (cell == null || isErrorCell(cell)) {
             return null;
         }
         if (isNumericCell(cell)) {
@@ -191,7 +191,7 @@ public final class ExcelHelper {
     }
 
     private static LocalDateTime parseDateTime(Cell cell) {
-        if (cell == null) {
+        if (cell == null || isErrorCell(cell)) {
             return null;
         }
         if (isNumericCell(cell)) {
@@ -214,7 +214,7 @@ public final class ExcelHelper {
     }
 
     private static BigDecimal parseDecimal(Cell cell) {
-        if (cell == null) {
+        if (cell == null || isErrorCell(cell)) {
             return null;
         }
         if (isNumericCell(cell)) {
@@ -231,5 +231,14 @@ public final class ExcelHelper {
         return cell.getCellType() == org.apache.poi.ss.usermodel.CellType.NUMERIC
             || (cell.getCellType() == org.apache.poi.ss.usermodel.CellType.FORMULA
             && cell.getCachedFormulaResultType() == org.apache.poi.ss.usermodel.CellType.NUMERIC);
+    }
+
+    private static boolean isErrorCell(Cell cell) {
+        if (cell == null) {
+            return false;
+        }
+        return cell.getCellType() == org.apache.poi.ss.usermodel.CellType.ERROR
+            || (cell.getCellType() == org.apache.poi.ss.usermodel.CellType.FORMULA
+            && cell.getCachedFormulaResultType() == org.apache.poi.ss.usermodel.CellType.ERROR);
     }
 }
