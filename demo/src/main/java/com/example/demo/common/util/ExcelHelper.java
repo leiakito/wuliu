@@ -1,5 +1,6 @@
 package com.example.demo.common.util;
 
+import com.example.demo.hardware.dto.HardwarePriceExcelParseResult;
 import com.example.demo.hardware.entity.HardwarePrice;
 import com.example.demo.order.entity.OrderRecord;
 import com.example.demo.order.util.TrackingCategoryUtil;
@@ -31,11 +32,12 @@ public final class ExcelHelper {
     private ExcelHelper() {
     }
 
-    public static List<HardwarePrice> readHardwarePrices(InputStream inputStream, LocalDate priceDate, String operator) throws IOException {
+    public static HardwarePriceExcelParseResult readHardwarePrices(InputStream inputStream, LocalDate priceDate, String operator) throws IOException {
+        HardwarePriceExcelParseResult result = new HardwarePriceExcelParseResult();
         if (priceDate == null) {
-            return List.of();
+            result.addError("未识别到日期");
+            return result;
         }
-        List<HardwarePrice> result = new ArrayList<>();
         try (Workbook workbook = WorkbookFactory.create(inputStream)) {
             Sheet sheet = workbook.getSheetAt(0);
             for (int i = 0; i <= sheet.getLastRowNum(); i++) {
@@ -44,19 +46,26 @@ public final class ExcelHelper {
                     continue;
                 }
                 String itemName = readString(row.getCell(0));
-                if (itemName == null || itemName.isBlank() || "型号".equals(itemName.trim())) {
+                BigDecimal parsedPrice = parseDecimal(row.getCell(1));
+                boolean rowEmpty = (itemName == null || itemName.isBlank()) && parsedPrice == null;
+                if (rowEmpty) {
                     continue;
                 }
-                BigDecimal price = parseDecimal(row.getCell(1));
-                if (price == null) {
-                    price = BigDecimal.ZERO;
+                if ("型号".equalsIgnoreCase(itemName == null ? "" : itemName.trim())) {
+                    continue;
                 }
+                result.setTotalRows(result.getTotalRows() + 1);
+                if (itemName == null || itemName.isBlank()) {
+                    result.addError("第" + (i + 1) + "行型号为空，已跳过");
+                    continue;
+                }
+                BigDecimal price = parsedPrice == null ? BigDecimal.ZERO : parsedPrice;
                 HardwarePrice record = new HardwarePrice();
                 record.setPriceDate(priceDate);
                 record.setItemName(itemName.trim());
                 record.setPrice(price);
                 record.setCreatedBy(operator);
-                result.add(record);
+                result.getRows().add(record);
             }
         }
         return result;
@@ -264,7 +273,8 @@ public final class ExcelHelper {
             if (cell.getCellStyle() == null) {
                 continue;
             }
-            Font font = workbook.getFontAt(cell.getCellStyle().getFontIndexAsInt());
+            short fontIndex = (short) cell.getCellStyle().getFontIndex();
+            Font font = workbook.getFontAt(fontIndex);
             if (font != null && font.getStrikeout()) {
                 return true;
             }

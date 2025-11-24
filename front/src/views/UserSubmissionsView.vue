@@ -450,13 +450,17 @@ const checkMissingTrackings = async (trackings: string[]) => {
   const normalized = trackings.map(t => normalizeTrackingNumber(t)).filter(Boolean);
   if (!normalized.length) return [];
   const result = await searchOrders(normalized);
-  const existingSet = new Set(
-    result
-      .map(item => item.trackingNumber)
-      .filter(Boolean)
-      .map(t => t.trim().toUpperCase())
-  );
-  return normalized.filter(t => !existingSet.has(t.toUpperCase()));
+  const existing = result
+    .map(item => item.trackingNumber)
+    .filter(Boolean)
+    .map(t => t.trim().toUpperCase());
+  return normalized.filter(t => {
+    const upper = t.toUpperCase();
+    if (existing.includes(upper)) {
+      return false;
+    }
+    return !existing.some(num => num.startsWith(`${upper}-`));
+  });
 };
 
 const persistInvalidTrackings = () => {

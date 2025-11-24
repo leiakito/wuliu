@@ -6,7 +6,7 @@
         <p class="sub">只记录型号、价格与录入人，支持上传 Excel 批量导入</p>
       </div>
       <div class="actions" v-if="isAdmin">
-        <input ref="fileInput" type="file" accept=".xls,.xlsx" hidden @change="handleFileChange" />
+        <input ref="fileInput" type="file" accept=".xls,.xlsx" multiple hidden @change="handleFileChange" />
         <el-button @click="openBatchDialog">导入Excel</el-button>
         <el-button type="primary" @click="openDialog()">新增价格</el-button>
       </div>
@@ -80,45 +80,109 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="batchDialog.visible" title="导入Excel" width="560px">
+    <el-dialog v-model="batchDialog.visible" title="导入Excel" width="760px">
       <p class="muted" style="margin-bottom: 12px">
-        上传 Excel：首列 <code>型号</code>，第二列 <code>价格</code>，日期使用下方选择的值。
+        支持单个或多个 Excel 文件，文件名需包含日期（yyyy-MM-dd），如 <code>2025-10-10.xlsx</code>，系统会自动识别并导入。
       </p>
-      <div class="batch-form file-line">
-        <el-date-picker
-          v-model="batchDialog.form.priceDate"
-          type="date"
-          value-format="YYYY-MM-DD"
-          placeholder="选择日期（默认为今日）"
-        />
-        <el-input v-model="batchDialog.fileName" placeholder="请选择 Excel 文件" readonly />
-        <el-button @click="triggerFileSelect">选择文件</el-button>
+      <div
+        class="upload-drop"
+        @click="triggerFileSelect"
+        @dragover.prevent
+        @drop.prevent="handleDrop"
+      >
+        <div class="upload-left">
+          <el-icon><UploadFilled /></el-icon>
+          <div>
+            <div class="upload-title">拖拽或点击上传</div>
+            <div class="muted">可一次选择多个 .xls / .xlsx 文件，自动匹配日期</div>
+          </div>
+        </div>
+        <el-button>选择文件</el-button>
       </div>
-      <template #footer>
-        <el-button @click="batchDialog.visible = false">取消</el-button>
-        <el-button type="primary" :loading="batchDialog.loading" @click="submitBatch">导入</el-button>
-      </template>
-    </el-dialog>
 
-    <el-dialog
-      v-model="batchProgress.visible"
-      title="Excel 导入中"
-      width="360px"
-      :show-close="false"
-      align-center
-    >
-      <p class="muted" style="margin-bottom: 12px">正在导入数据，请稍候…</p>
-      <el-progress :percentage="batchProgress.percent" :stroke-width="12" status="success" />
+      <el-table v-if="batchDialog.files.length" :data="batchDialog.files" size="small" class="file-table">
+        <el-table-column prop="name" label="文件名" min-width="260">
+          <template #default="{ row }">
+            <div class="file-name">{{ row.name }}</div>
+            <div class="muted small">大小 {{ formatSize(row.size) }}</div>
+          </template>
+        </el-table-column>
+        <el-table-column prop="priceDate" label="识别日期" width="160">
+          <template #default="{ row }">
+            <span v-if="row.priceDate">{{ row.priceDate }}</span>
+            <el-tag v-else type="danger" size="small">未识别</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="状态" width="160">
+          <template #default="{ row }">
+            <el-tag v-if="row.status === 'ready'" type="success" size="small">待导入</el-tag>
+            <el-tag v-else type="danger" size="small">校验失败</el-tag>
+            <span v-if="row.message" class="muted small">{{ row.message }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="120">
+          <template #default="{ row }">
+            <el-button link type="danger" @click="removeFile(row.uid)">移除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+
+      <div v-if="batchDialog.uploading" class="progress-block">
+        <el-progress :percentage="batchDialog.progress" :stroke-width="12" :status="batchDialog.progress >= 100 ? 'success' : undefined" />
+        <div class="muted small">文件较大时请耐心等待，上传与解析进度将同步更新。</div>
+      </div>
+
+      <el-alert
+        v-if="batchDialog.results.length"
+        :type="batchDialog.results.some(item => !item.success) ? 'warning' : 'success'"
+        show-icon
+        :closable="false"
+        class="result-alert"
+      >
+        <template #title>导入结果</template>
+        <div class="result-list">
+          <div v-for="item in batchDialog.results" :key="item.fileName" class="result-item">
+            <div class="result-main">
+              <span class="file-name">{{ item.fileName }}</span>
+              <el-tag :type="item.success ? 'success' : 'danger'" size="small">
+                {{ item.success ? '成功' : '失败' }}
+              </el-tag>
+              <span class="muted small">{{ item.priceDate || '未识别日期' }}</span>
+            </div>
+            <div class="result-desc">
+              <span v-if="item.success">导入 {{ item.successCount ?? 0 }} 条，跳过 {{ item.skippedCount ?? 0 }} 条</span>
+              <span v-else>{{ item.message }}</span>
+              <span class="muted small">耗时 {{ Math.round((item.durationMillis ?? 0) / 1000) }}s</span>
+            </div>
+            <ul v-if="item.errors?.length" class="error-list">
+              <li v-for="(err, idx) in item.errors" :key="idx">{{ err }}</li>
+            </ul>
+          </div>
+        </div>
+      </el-alert>
+
+      <template #footer>
+        <div class="dialog-footer">
+          <div class="muted small">
+            已选 {{ batchDialog.files.length }} 个文件；仅处理文件名格式为 <code>yyyy-MM-dd.xlsx</code> 的记录。
+          </div>
+          <div class="footer-actions">
+            <el-button @click="batchDialog.visible = false" :disabled="batchDialog.uploading">取消</el-button>
+            <el-button type="primary" :loading="batchDialog.uploading" @click="submitBatch">开始导入</el-button>
+          </div>
+        </div>
+      </template>
     </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref, watch, onBeforeUnmount } from 'vue';
+import { computed, reactive, ref, watch } from 'vue';
 import type { FormInstance, FormRules } from 'element-plus';
 import { ElMessage, ElMessageBox } from 'element-plus';
+import { UploadFilled } from '@element-plus/icons-vue';
 import { fetchHardwarePrices, createHardwarePrice, updateHardwarePrice, deleteHardwarePrice, importHardwarePrices } from '@/api/hardware';
-import type { HardwarePrice, HardwarePriceRequest } from '@/types/models';
+import type { HardwarePrice, HardwarePriceRequest, HardwareImportResult } from '@/types/models';
 import { useAuthStore } from '@/store/auth';
 
 const auth = useAuthStore();
@@ -130,6 +194,16 @@ const filters = reactive({
   itemName: ''
 });
 const autoSearchSuspended = ref(false);
+
+interface ImportFileItem {
+  uid: number;
+  file: File;
+  name: string;
+  size: number;
+  priceDate?: string;
+  status: 'ready' | 'error';
+  message?: string;
+}
 
 const prices = ref<HardwarePrice[]>([]);
 const loading = ref(false);
@@ -143,16 +217,11 @@ const dialog = reactive({
 
 const batchDialog = reactive({
   visible: false,
-  loading: false,
-  form: { priceDate: '' },
-  fileName: ''
+  uploading: false,
+  progress: 0,
+  files: [] as ImportFileItem[],
+  results: [] as HardwareImportResult[]
 });
-const batchProgress = reactive({
-  visible: false,
-  percent: 0,
-  timer: null as number | null
-});
-const selectedFile = ref<File | null>(null);
 
 const formRef = ref<FormInstance>();
 
@@ -222,11 +291,10 @@ const openDialog = (price?: HardwarePrice) => {
 };
 
 const openBatchDialog = () => {
-  selectedFile.value = null;
-  batchDialog.fileName = '';
-  batchDialog.form.priceDate = (Array.isArray(filters.range) && filters.range[1])
-    ? filters.range[1]
-    : formatDate(new Date());
+  batchDialog.uploading = false;
+  batchDialog.progress = 0;
+  batchDialog.files = [];
+  batchDialog.results = [];
   if (fileInput.value) {
     fileInput.value.value = '';
   }
@@ -239,10 +307,16 @@ const triggerFileSelect = () => {
 
 const handleFileChange = (event: Event) => {
   const target = event.target as HTMLInputElement;
-  const file = target.files?.[0];
-  if (!file) return;
-  selectedFile.value = file;
-  batchDialog.fileName = file.name;
+  if (target.files && target.files.length) {
+    addFiles(target.files);
+    target.value = '';
+  }
+};
+
+const handleDrop = (event: DragEvent) => {
+  if (event.dataTransfer?.files?.length) {
+    addFiles(event.dataTransfer.files);
+  }
 };
 
 const submitForm = async () => {
@@ -279,55 +353,89 @@ const formatDateTime = (value?: string) => {
   return normalized.slice(0, 19);
 };
 
-const startBatchProgress = () => {
-  batchProgress.visible = true;
-  batchProgress.percent = 10;
-  if (batchProgress.timer) {
-    clearInterval(batchProgress.timer);
-  }
-  batchProgress.timer = window.setInterval(() => {
-    if (batchProgress.percent < 90) {
-      batchProgress.percent += 10;
-    }
-  }, 300);
+const parseDateFromName = (name: string) => {
+  const match = name.match(/(20\d{2}-\d{2}-\d{2})/);
+  return match ? match[1] : '';
 };
 
-const finishBatchProgress = () => {
-  if (batchProgress.timer) {
-    clearInterval(batchProgress.timer);
-    batchProgress.timer = null;
-  }
-  batchProgress.percent = 100;
-  setTimeout(() => {
-    batchProgress.visible = false;
-    batchProgress.percent = 0;
-  }, 400);
+const formatSize = (size: number) => {
+  if (!size && size !== 0) return '-';
+  if (size < 1024) return `${size}B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)}KB`;
+  return `${(size / 1024 / 1024).toFixed(1)}MB`;
+};
+
+const addFiles = (fileList: FileList | File[]) => {
+  const existingKeys = new Set(batchDialog.files.map(f => `${f.name}-${f.priceDate ?? ''}`));
+  Array.from(fileList).forEach(file => {
+    const priceDate = parseDateFromName(file.name);
+    const key = `${file.name}-${priceDate}`;
+    if (existingKeys.has(key)) {
+      return;
+    }
+    existingKeys.add(key);
+    const item: ImportFileItem = {
+      uid: Date.now() + Math.random(),
+      file,
+      name: file.name,
+      size: file.size,
+      priceDate,
+      status: 'ready',
+      message: ''
+    };
+    const isExcel = /\.(xls|xlsx)$/i.test(file.name);
+    if (!isExcel) {
+      item.status = 'error';
+      item.message = '仅支持 .xls / .xlsx 文件';
+    } else if (!priceDate) {
+      item.status = 'error';
+      item.message = '文件名需包含日期（yyyy-MM-dd）';
+    }
+    batchDialog.files.push(item);
+  });
+  batchDialog.results = [];
+};
+
+const removeFile = (uid: number) => {
+  batchDialog.files = batchDialog.files.filter(item => item.uid !== uid);
+  batchDialog.results = [];
 };
 
 const submitBatch = async () => {
-  if (!batchDialog.form.priceDate) {
-    ElMessage.warning('请先选择日期');
-    return;
-  }
-  if (!selectedFile.value) {
+  if (!batchDialog.files.length) {
     ElMessage.warning('请先选择 Excel 文件');
     return;
   }
-  startBatchProgress();
-  batchDialog.loading = true;
+  const invalid = batchDialog.files.filter(item => item.status === 'error' || !item.priceDate);
+  if (invalid.length) {
+    ElMessage.error('存在未通过校验的文件，请先处理或移除');
+    return;
+  }
+  batchDialog.uploading = true;
+  batchDialog.progress = 8;
+  batchDialog.results = [];
   try {
-    await importHardwarePrices(selectedFile.value, batchDialog.form.priceDate);
-    ElMessage.success('导入成功');
-    batchDialog.visible = false;
-    selectedFile.value = null;
-    batchDialog.fileName = '';
-    if (fileInput.value) {
-      fileInput.value.value = '';
+    const results = await importHardwarePrices(
+      batchDialog.files.map(item => item.file),
+      percent => {
+        batchDialog.progress = Math.min(98, Math.max(batchDialog.progress, percent));
+      }
+    );
+    batchDialog.results = results;
+    batchDialog.progress = 100;
+    const hasError = results.some(item => !item.success);
+    const message = hasError ? '部分文件导入失败，请查看结果' : '导入完成';
+    if (hasError) {
+      ElMessage.warning(message);
+    } else {
+      ElMessage.success(message);
     }
     loadPrices();
   } finally {
-    batchDialog.loading = false;
-    finishBatchProgress();
+    batchDialog.uploading = false;
+    setTimeout(() => {
+      batchDialog.progress = 0;
+    }, 600);
   }
 };
 
@@ -340,12 +448,6 @@ watch(() => filters.range, triggerAutoSearch, { deep: true });
 watch(() => filters.itemName, triggerAutoSearch);
 
 resetFilters();
-
-onBeforeUnmount(() => {
-  if (batchProgress.timer) {
-    clearInterval(batchProgress.timer);
-  }
-});
 </script>
 
 <style scoped>
@@ -358,20 +460,100 @@ onBeforeUnmount(() => {
   margin-top: 16px;
 }
 
-.batch-form {
+.upload-drop {
+  border: 1px dashed var(--el-border-color);
+  padding: 12px 16px;
+  border-radius: 8px;
   display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  background: var(--el-fill-color-lighter);
+  transition: border-color 0.2s ease;
+}
+
+.upload-drop:hover {
+  border-color: var(--el-color-primary);
+}
+
+.upload-left {
+  display: flex;
+  align-items: center;
   gap: 12px;
-  margin-bottom: 12px;
+}
+
+.upload-left .el-icon {
+  font-size: 28px;
+  color: var(--el-color-primary);
+}
+
+.upload-title {
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.file-table {
+  margin-top: 12px;
+}
+
+.file-name {
+  font-weight: 600;
+}
+
+.muted.small {
+  font-size: 12px;
+}
+
+.progress-block {
+  margin-top: 12px;
+}
+
+.result-alert {
+  margin-top: 16px;
+}
+
+.result-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.result-item {
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: var(--el-fill-color-lighter);
+}
+
+.result-main {
+  display: flex;
+  gap: 10px;
   align-items: center;
 }
 
-.batch-form .el-input,
-.batch-form .el-input-number,
-.batch-form .el-date-picker {
-  flex: 1;
+.result-desc {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  margin-top: 4px;
 }
 
-.batch-form.file-line .el-button {
-  flex: 0 0 110px;
+.error-list {
+  margin: 6px 0 0;
+  padding-left: 16px;
+  color: var(--el-color-danger);
+}
+
+.dialog-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.footer-actions {
+  display: flex;
+  gap: 12px;
 }
 </style>

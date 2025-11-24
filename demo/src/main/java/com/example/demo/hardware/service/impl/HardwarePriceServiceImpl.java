@@ -4,6 +4,8 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.example.demo.common.exception.BusinessException;
 import com.example.demo.common.exception.ErrorCode;
 import com.example.demo.common.util.ExcelHelper;
+import com.example.demo.hardware.dto.HardwarePriceExcelParseResult;
+import com.example.demo.hardware.dto.HardwarePriceImportResult;
 import com.example.demo.hardware.dto.HardwarePriceQuery;
 import com.example.demo.hardware.dto.HardwarePriceRequest;
 import com.example.demo.hardware.entity.HardwarePrice;
@@ -11,13 +13,18 @@ import com.example.demo.hardware.mapper.HardwarePriceMapper;
 import com.example.demo.hardware.service.HardwarePriceService;
 import java.io.IOException;
 import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
@@ -26,7 +33,11 @@ import org.springframework.web.multipart.MultipartFile;
 @RequiredArgsConstructor
 public class HardwarePriceServiceImpl implements HardwarePriceService {
 
+    private static final Pattern DATE_IN_FILENAME = Pattern.compile("(20\\d{2}-\\d{2}-\\d{2})");
+    private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+
     private final HardwarePriceMapper hardwarePriceMapper;
+    private final TransactionTemplate transactionTemplate;
 
     @Override
     public List<HardwarePrice> list(HardwarePriceQuery query) {
@@ -95,61 +106,179 @@ public class HardwarePriceServiceImpl implements HardwarePriceService {
     }
 
     @Override
-    @Transactional
     public List<HardwarePrice> importExcel(LocalDate priceDate, MultipartFile file, String operator) {
-        if (priceDate == null) {
-            throw new BusinessException(ErrorCode.BAD_REQUEST, "请先选择日期");
+        HardwarePriceImportResult result = doImport(priceDate, file, operator, true, true);
+        return result.getRecords();
+    }
+
+    @Override
+    public List<HardwarePriceImportResult> importExcelBatch(List<MultipartFile> files, String operator) {
+        if (CollectionUtils.isEmpty(files)) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "请至少上传一个 Excel 文件");
         }
+        List<HardwarePriceImportResult> results = new ArrayList<>();
+        for (MultipartFile file : files) {
+            if (file == null || file.isEmpty()) {
+                results.add(failureResult(file, "文件为空，已跳过"));
+                continue;
+            }
+            try {
+                results.add(doImport(null, file, operator, false, false));
+            } catch (BusinessException ex) {
+                results.add(failureResult(file, ex.getMessage()));
+            } catch (Exception ex) {
+                results.add(failureResult(file, "导入失败，请检查文件格式或重试"));
+            }
+        }
+        return results;
+    }
+
+    private HardwarePriceImportResult doImport(LocalDate priceDate, MultipartFile file, String operator, boolean rethrowOnError, boolean includeRecords) {
+        long start = System.currentTimeMillis();
+        validateExcelFile(file);
+        LocalDate resolvedDate = resolvePriceDate(priceDate, file);
+        try {
+            HardwarePriceExcelParseResult parseResult = ExcelHelper.readHardwarePrices(file.getInputStream(), resolvedDate, operator);
+            if (CollectionUtils.isEmpty(parseResult.getRows())) {
+                throw new BusinessException(ErrorCode.BAD_REQUEST, "Excel 中没有有效数据");
+            }
+            HardwarePriceImportResult saved = transactionTemplate.execute(status ->
+                saveImportedRows(parseResult, resolvedDate, operator)
+            );
+            if (saved == null) {
+                throw new BusinessException(ErrorCode.SYSTEM_ERROR, "导入失败，请稍后重试");
+            }
+            if (!includeRecords) {
+                saved.setRecords(List.of());
+            }
+            saved.setFileName(extractFileName(file));
+            saved.setDurationMillis(System.currentTimeMillis() - start);
+            return saved;
+        } catch (BusinessException ex) {
+            if (rethrowOnError) {
+                throw ex;
+            }
+            HardwarePriceImportResult failure = failureResult(file, ex.getMessage());
+            failure.setDurationMillis(System.currentTimeMillis() - start);
+            return failure;
+        } catch (IOException ex) {
+            if (rethrowOnError) {
+                throw new BusinessException(ErrorCode.BAD_REQUEST, "Excel 解析失败");
+            }
+            HardwarePriceImportResult failure = failureResult(file, "Excel 解析失败");
+            failure.setDurationMillis(System.currentTimeMillis() - start);
+            return failure;
+        }
+    }
+
+    private HardwarePriceImportResult saveImportedRows(HardwarePriceExcelParseResult parseResult, LocalDate priceDate, String operator) {
+        Map<String, HardwarePrice> latestByItem = new LinkedHashMap<>();
+        for (HardwarePrice row : parseResult.getRows()) {
+            String normalized = normalizeItemName(row.getItemName());
+            if (StringUtils.hasText(normalized)) {
+                row.setItemName(normalized);
+                row.setPriceDate(priceDate);
+                row.setCreatedBy(operator);
+                latestByItem.put(normalized, row);
+            }
+        }
+        if (latestByItem.isEmpty()) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "未找到有效的型号数据");
+        }
+
+        LambdaQueryWrapper<HardwarePrice> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(HardwarePrice::getPriceDate, priceDate);
+        Map<String, HardwarePrice> existedMap = hardwarePriceMapper.selectList(wrapper).stream()
+            .filter(h -> StringUtils.hasText(h.getItemName()))
+            .collect(java.util.stream.Collectors.toMap(
+                h -> normalizeItemName(h.getItemName()),
+                h -> h,
+                (a, b) -> a,
+                LinkedHashMap::new
+            ));
+
+        List<HardwarePrice> result = new ArrayList<>();
+        int inserted = 0;
+        int updated = 0;
+        for (HardwarePrice item : latestByItem.values()) {
+            HardwarePrice existed = existedMap.get(item.getItemName());
+            if (existed != null) {
+                existed.setPrice(item.getPrice());
+                existed.setItemName(item.getItemName());
+                existed.setCreatedBy(operator);
+                hardwarePriceMapper.updateById(existed);
+                result.add(existed);
+                updated++;
+            } else {
+                item.setCreatedBy(operator);
+                hardwarePriceMapper.insert(item);
+                result.add(item);
+                inserted++;
+            }
+        }
+        HardwarePriceImportResult importResult = new HardwarePriceImportResult();
+        importResult.setPriceDate(priceDate);
+        importResult.setRecords(result);
+        importResult.setInsertedCount(inserted);
+        importResult.setUpdatedCount(updated);
+        importResult.setSuccessCount(result.size());
+        importResult.setSkippedCount(parseResult.getErrors().size());
+        importResult.setTotalRows(parseResult.getTotalRows());
+        importResult.getErrors().addAll(parseResult.getErrors());
+        importResult.setSuccess(true);
+        if (parseResult.getErrors().isEmpty()) {
+            importResult.setMessage("导入成功");
+        } else {
+            importResult.setMessage("导入完成，部分数据已跳过");
+        }
+        return importResult;
+    }
+
+    private void validateExcelFile(MultipartFile file) {
         if (file == null || file.isEmpty()) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "请上传 Excel 文件");
         }
-        try {
-            List<HardwarePrice> rows = ExcelHelper.readHardwarePrices(file.getInputStream(), priceDate, operator);
-            if (CollectionUtils.isEmpty(rows)) {
-                return List.of();
+        String name = file.getOriginalFilename();
+        if (StringUtils.hasText(name)) {
+            String lower = name.toLowerCase();
+            if (!(lower.endsWith(".xls") || lower.endsWith(".xlsx"))) {
+                throw new BusinessException(ErrorCode.BAD_REQUEST, "仅支持 .xls 或 .xlsx 文件");
             }
-            Map<String, HardwarePrice> latestByItem = new LinkedHashMap<>();
-            for (HardwarePrice row : rows) {
-                String normalized = normalizeItemName(row.getItemName());
-                if (StringUtils.hasText(normalized)) {
-                    row.setItemName(normalized);
-                    latestByItem.put(normalized, row);
-                }
-            }
-            if (latestByItem.isEmpty()) {
-                return List.of();
-            }
-
-            LambdaQueryWrapper<HardwarePrice> wrapper = new LambdaQueryWrapper<>();
-            wrapper.eq(HardwarePrice::getPriceDate, priceDate);
-            Map<String, HardwarePrice> existedMap = hardwarePriceMapper.selectList(wrapper).stream()
-                .filter(h -> StringUtils.hasText(h.getItemName()))
-                .collect(java.util.stream.Collectors.toMap(
-                    h -> normalizeItemName(h.getItemName()),
-                    h -> h,
-                    (a, b) -> a,
-                    LinkedHashMap::new
-                ));
-
-            List<HardwarePrice> result = new ArrayList<>();
-            for (HardwarePrice item : latestByItem.values()) {
-                HardwarePrice existed = existedMap.get(item.getItemName());
-                if (existed != null) {
-                    existed.setPrice(item.getPrice());
-                    existed.setItemName(item.getItemName());
-                    existed.setCreatedBy(operator);
-                    hardwarePriceMapper.updateById(existed);
-                    result.add(existed);
-                } else {
-                    item.setCreatedBy(operator);
-                    hardwarePriceMapper.insert(item);
-                    result.add(item);
-                }
-            }
-            return result;
-        } catch (IOException e) {
-            throw new BusinessException(ErrorCode.BAD_REQUEST, "Excel 解析失败");
         }
+    }
+
+    private LocalDate resolvePriceDate(LocalDate priceDate, MultipartFile file) {
+        if (priceDate != null) {
+            return priceDate;
+        }
+        String name = file == null ? null : file.getOriginalFilename();
+        if (!StringUtils.hasText(name)) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "文件名为空，无法识别日期");
+        }
+        Matcher matcher = DATE_IN_FILENAME.matcher(name);
+        if (!matcher.find()) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "文件名需包含日期（yyyy-MM-dd），如 2025-10-10.xlsx");
+        }
+        String matched = matcher.group(1);
+        try {
+            return LocalDate.parse(matched, DATE_FORMATTER);
+        } catch (DateTimeParseException ex) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "文件名中的日期格式有误，示例：2025-10-10.xlsx");
+        }
+    }
+
+    private HardwarePriceImportResult failureResult(MultipartFile file, String message) {
+        HardwarePriceImportResult result = new HardwarePriceImportResult();
+        result.setFileName(extractFileName(file));
+        result.setSuccess(false);
+        result.setMessage(message);
+        result.getErrors().add(message);
+        return result;
+    }
+
+    private String extractFileName(MultipartFile file) {
+        String name = file == null ? null : file.getOriginalFilename();
+        return StringUtils.hasText(name) ? name : "未命名.xlsx";
     }
 
     private void validateUnique(LocalDate date, String itemName, Long excludeId) {

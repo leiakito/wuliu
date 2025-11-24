@@ -46,7 +46,7 @@ public class UserSubmissionServiceImpl implements UserSubmissionService {
         String submitter = normalizeUsername(operator);
         String owner = normalizeUsername(ownerUsername);
         String rawContent = request.getTrackingNumber();
-        String trackingNumber = normalizeTracking(rawContent);
+        String trackingNumber = resolveTrackingNumber(rawContent);
         UserSubmission submission = createSingleSubmission(trackingNumber, submitter, owner);
         userSubmissionLogService.record(submitter, rawContent);
         return submission;
@@ -58,7 +58,7 @@ public class UserSubmissionServiceImpl implements UserSubmissionService {
         String submitter = normalizeUsername(operator);
         String owner = normalizeUsername(ownerUsername);
         LinkedHashSet<String> sanitized = request.getTrackingNumbers().stream()
-            .map(this::normalizeTracking)
+            .map(this::resolveTrackingNumber)
             .filter(StringUtils::hasText)
             .collect(Collectors.toCollection(LinkedHashSet::new));
         if (sanitized.isEmpty()) {
@@ -168,11 +168,71 @@ public class UserSubmissionServiceImpl implements UserSubmissionService {
         }
     }
 
+    private boolean isSubmitted(String trackingNumber) {
+        LambdaQueryWrapper<UserSubmission> exists = new LambdaQueryWrapper<>();
+        exists.eq(UserSubmission::getTrackingNumber, trackingNumber);
+        return userSubmissionMapper.selectCount(exists) > 0;
+    }
+
     private String normalizeTracking(String input) {
         if (!StringUtils.hasText(input)) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "单号不能为空");
         }
-        return input.trim();
+        String cleaned = input
+            .replaceAll("^[='‘’“”\"`\\u200B-\\u200F\\uFEFF]+", "")
+            .trim();
+        while (cleaned.endsWith("-")) {
+            cleaned = cleaned.substring(0, cleaned.length() - 1).trim();
+        }
+        if (!StringUtils.hasText(cleaned)) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "单号不能为空");
+        }
+        return cleaned;
+    }
+
+    private String resolveTrackingNumber(String raw) {
+        String normalized = normalizeTracking(raw);
+        // 1) 完全匹配
+        OrderRecord exact = findOrder(normalized);
+        if (exact != null && StringUtils.hasText(exact.getTrackingNumber())) {
+            return exact.getTrackingNumber().trim();
+        }
+        // 2) 按前缀模糊匹配 JD 尾缀：PREFIX-1-1
+        String prefix = normalized.replaceAll("-+$", "");
+        List<OrderRecord> candidates = findOrdersByPrefix(prefix);
+        if (!candidates.isEmpty()) {
+            for (OrderRecord candidate : candidates) {
+                String number = candidate.getTrackingNumber();
+                if (StringUtils.hasText(number) && !isSubmitted(number.trim())) {
+                    return number.trim();
+                }
+            }
+            String first = candidates.get(0).getTrackingNumber();
+            if (StringUtils.hasText(first)) {
+                return first.trim();
+            }
+        }
+        // 3) 回退到用户输入
+        return normalized;
+    }
+
+    private OrderRecord findOrder(String trackingNumber) {
+        LambdaQueryWrapper<OrderRecord> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(OrderRecord::getTrackingNumber, trackingNumber);
+        return orderRecordMapper.selectOne(wrapper);
+    }
+
+    private List<OrderRecord> findOrdersByPrefix(String prefix) {
+        if (!StringUtils.hasText(prefix) || prefix.length() < 6) {
+            return List.of();
+        }
+        LambdaQueryWrapper<OrderRecord> wrapper = new LambdaQueryWrapper<>();
+        wrapper.likeRight(OrderRecord::getTrackingNumber, prefix + "-")
+            .orderByDesc(OrderRecord::getOrderTime)
+            .orderByDesc(OrderRecord::getCreatedAt)
+            .orderByAsc(OrderRecord::getTrackingNumber)
+            .last("LIMIT 20");
+        return orderRecordMapper.selectList(wrapper);
     }
 
     private UserSubmission createSingleSubmission(String trackingNumber, String submitter, String ownerUsername) {

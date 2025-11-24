@@ -6,6 +6,7 @@ import cn.dev33.satoken.stp.StpUtil;
 import com.example.demo.common.annotation.LogOperation;
 import com.example.demo.common.response.ApiResponse;
 import com.example.demo.hardware.dto.HardwarePriceBatchRequest;
+import com.example.demo.hardware.dto.HardwarePriceImportResult;
 import com.example.demo.hardware.dto.HardwarePriceQuery;
 import com.example.demo.hardware.dto.HardwarePriceRequest;
 import com.example.demo.hardware.entity.HardwarePrice;
@@ -64,10 +65,20 @@ public class HardwarePriceController {
     @LogOperation("导入硬件价格")
     @Operation(summary = "导入Excel", description = "上传 Excel 按日期批量导入硬件价格")
     public ApiResponse<List<HardwarePrice>> importExcel(
-        @RequestParam("priceDate") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate priceDate,
+        @RequestParam(value = "priceDate", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate priceDate,
         @RequestParam("file") MultipartFile file
     ) {
         return ApiResponse.ok(hardwarePriceService.importExcel(priceDate, file, StpUtil.getLoginIdAsString()));
+    }
+
+    @PostMapping("/import/batch")
+    @SaCheckRole("ADMIN")
+    @LogOperation("批量导入硬件价格")
+    @Operation(summary = "批量导入Excel", description = "支持多文件上传，自动从文件名解析日期")
+    public ApiResponse<List<HardwarePriceImportResult>> importExcelBatch(
+        @RequestParam("files") List<MultipartFile> files
+    ) {
+        return ApiResponse.ok(hardwarePriceService.importExcelBatch(files, StpUtil.getLoginIdAsString()));
     }
 
     @PutMapping("/{id}")

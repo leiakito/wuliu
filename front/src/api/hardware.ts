@@ -1,5 +1,5 @@
 import apiClient from './client';
-import type { HardwarePrice, HardwarePriceRequest, HardwarePriceBatchRequest } from '@/types/models';
+import type { HardwarePrice, HardwarePriceRequest, HardwarePriceBatchRequest, HardwareImportResult } from '@/types/models';
 
 export interface HardwarePriceQuery {
   startDate?: string;
@@ -16,13 +16,18 @@ export const createHardwarePrice = (payload: HardwarePriceRequest) =>
 export const createHardwarePricesBatch = (payload: HardwarePriceBatchRequest) =>
   apiClient.post<HardwarePrice[]>('/hardware/prices/batch', payload);
 
-export const importHardwarePrices = (file: File, priceDate: string) => {
+export const importHardwarePrices = (files: File[], onProgress?: (percent: number) => void) => {
   const formData = new FormData();
-  formData.append('file', file);
-  formData.append('priceDate', priceDate);
-  return apiClient.post<HardwarePrice[]>('/hardware/prices/import', formData, {
+  files.forEach(file => formData.append('files', file));
+  return apiClient.post<HardwareImportResult[]>('/hardware/prices/import/batch', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
-    timeout: 180000
+    timeout: 300000,
+    onUploadProgress: event => {
+      if (event.total) {
+        const percent = Math.round((event.loaded / event.total) * 100);
+        onProgress?.(percent);
+      }
+    }
   });
 };
 

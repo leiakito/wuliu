@@ -2,6 +2,7 @@ package com.example.demo.hardware.service;
 
 import com.example.demo.hardware.dto.HardwarePriceQuery;
 import com.example.demo.hardware.dto.HardwarePriceRequest;
+import com.example.demo.hardware.dto.HardwarePriceImportResult;
 import com.example.demo.hardware.entity.HardwarePrice;
 import java.time.LocalDate;
 import java.util.List;
@@ -20,4 +21,6 @@ public interface HardwarePriceService {
     List<HardwarePrice> batchCreate(List<HardwarePriceRequest> requests, String operator);
 
     List<HardwarePrice> importExcel(LocalDate priceDate, MultipartFile file, String operator);
+
+    List<HardwarePriceImportResult> importExcelBatch(List<MultipartFile> files, String operator);
 }

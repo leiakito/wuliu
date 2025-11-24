@@ -213,13 +213,30 @@ public class OrderServiceImpl implements OrderService {
         if (unique.isEmpty()) {
             return List.of();
         }
+        List<String> prefixes = unique.stream()
+            .map(String::trim)
+            .map(str -> str.replaceAll("-+$", ""))
+            .filter(str -> str.length() >= 6)
+            .filter(str -> !str.contains("-"))
+            .toList();
         LambdaQueryWrapper<OrderRecord> wrapper = new LambdaQueryWrapper<>();
         wrapper.and(w -> w.in(OrderRecord::getTrackingNumber, unique)
             .or()
             .in(OrderRecord::getSn, unique));
+        if (!prefixes.isEmpty()) {
+            wrapper.or(w -> {
+                for (int i = 0; i < prefixes.size(); i++) {
+                    w.likeRight(OrderRecord::getTrackingNumber, prefixes.get(i) + "-");
+                    if (i < prefixes.size() - 1) {
+                        w.or();
+                    }
+                }
+            });
+        }
         //等价 AND (
         //  tracking_number IN (?,?,?,?)
         //  OR sn IN (?,?,?,?)
+        //  OR tracking_number LIKE 'PREFIX-%' ...
         //)
         return orderRecordMapper.selectList(wrapper);
     }

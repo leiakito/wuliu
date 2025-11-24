@@ -56,6 +56,21 @@ export interface HardwarePriceBatchRequest {
   items: HardwarePriceRequest[];
 }
 
+export interface HardwareImportResult {
+  fileName: string;
+  priceDate?: string;
+  success: boolean;
+  message?: string;
+  successCount?: number;
+  insertedCount?: number;
+  updatedCount?: number;
+  skippedCount?: number;
+  totalRows?: number;
+  durationMillis?: number;
+  errors?: string[];
+  records?: HardwarePrice[];
+}
+
 export interface OrderFilterRequest {
   startDate?: string;
   endDate?: string;
