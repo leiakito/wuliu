@@ -24,16 +24,17 @@
             value-format="YYYY-MM-DD"
           />
         </el-form-item>
-        <el-form-item label="分类">
-          <el-input v-model="filters.category" placeholder="如 手机" clearable />
-        </el-form-item>
         <el-form-item label="状态">
           <el-select v-model="filters.status" placeholder="全部" clearable style="width: 160px">
             <el-option v-for="item in statusOptions" :key="item.value" :label="item.label" :value="item.value" />
           </el-select>
         </el-form-item>
         <el-form-item label="关键字">
-          <el-input v-model="filters.keyword" placeholder="单号/型号/客户" />
+            <el-input
+            v-model="filters.keyword"
+            placeholder="单号/SN/型号"
+            @input="handleKeywordInput"
+          />
         </el-form-item>
         <el-form-item>
           <el-button type="primary" @click="handleSearch">查询</el-button>
@@ -46,44 +47,20 @@
       <template #header>
         <div class="settle-bar">
           <span>订单状态查询</span>
-          <small class="muted">输入单号即可查询是否结账/录入</small>
+          <small class="muted">输入单号或 SN 即可查询是否结账/录入</small>
         </div>
       </template>
       <el-input
         v-model="userSearchInput"
         type="textarea"
         :rows="4"
-        placeholder="支持多个单号，使用换行/逗号/分号分隔"
+        placeholder="支持多个单号或 SN，使用换行/逗号/分号分隔"
+        @input="handleUserSearchInput"
       />
       <div class="user-search-actions">
         <el-button type="primary" :loading="userSearchLoading" @click="handleUserSearch">查询状态</el-button>
         <el-button text :disabled="!userOrders.length" @click="clearUserResults">清空记录</el-button>
         <el-button text :disabled="!userOrders.length" @click="exportUserOrders">导出 Excel</el-button>
-      </div>
-    </el-card>
-
-    <el-card v-if="isAdmin" class="batch-card">
-      <template #header>
-        <div class="settle-bar">
-          <span>批量抓取</span>
-          <el-button type="success" :loading="batchLoading" @click="handleBatchFetch">抓取并保存</el-button>
-        </div>
-      </template>
-      <div class="batch-grid">
-        <el-input
-          v-model="batchNumbers"
-          type="textarea"
-          :rows="4"
-          placeholder="每行一个单号"
-        />
-        <el-input-number
-          v-model="manualAmount"
-          :min="0"
-          :step="10"
-          controls-position="right"
-          label="统一金额 (可选)"
-          placeholder="统一金额 (可选)"
-        />
       </div>
     </el-card>
 
@@ -102,17 +79,38 @@
       </div>
       <div class="quick-filter-row">
         <span class="label">物流公司：</span>
-        <el-check-tag :checked="quickCategory === ''" @click="setCategoryFilter('')">全部</el-check-tag>
-        <el-check-tag
-          v-for="category in categoryChips"
-          :key="category.name"
-          :checked="quickCategory === category.name"
-          @click="setCategoryFilter(category.name)"
-        >
-          {{ category.name }}（{{ category.count }}）
-        </el-check-tag>
+        <em class="muted">已移除分类筛选</em>
       </div>
     </div>
+
+    <el-card v-if="isAdmin && diffNotices.length" class="diff-card">
+      <template #header>
+        <div class="settle-bar">
+          <div>
+            <span>变更提醒</span>
+            <small class="muted">导入/新增/编辑后与此前记录不一致的条目</small>
+          </div>
+          <el-button type="text" size="small" @click="exportDiffNotices" :disabled="!diffNotices.length">导出</el-button>
+        </div>
+      </template>
+      <ul class="diff-list">
+        <li v-for="item in diffNotices" :key="item.trackingNumber">
+          <div class="diff-row">
+            <div>
+              <strong>{{ item.trackingNumber }}</strong>：{{ item.message }}
+              <div class="diff-details">
+                <span v-for="(label, idx) in diffFields(item)" :key="idx">
+                  <em>{{ label }}</em>
+                  <span class="diff-before">旧: {{ formatDiffValue(item.before, label) }}</span>
+                  <span class="diff-after">新: {{ formatDiffValue(item.after, label) }}</span>
+                </span>
+              </div>
+            </div>
+            <el-button type="text" size="small" @click="removeDiffNotice(item.trackingNumber)">清除</el-button>
+          </div>
+        </li>
+      </ul>
+    </el-card>
 
     <el-card class="table-card">
       <el-table :data="filteredTableData" v-loading="tableLoading" style="width: 100%">
@@ -125,27 +123,6 @@
         <el-table-column prop="sn" label="SN" width="180">
           <template #default="{ row }">
             <span :class="['sn-text', { 'sn-duplicate': isSnDuplicate(row.sn) }]">{{ row.sn }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="category" label="分类" width="120" />
-        <el-table-column prop="amount" label="金额" width="160">
-          <template #default="{ row }">
-            <template v-if="isAdmin">
-              <div class="amount-cell">
-                <span class="currency-label">￥</span>
-                <el-input-number
-                  v-model="row.amount"
-                  :min="0"
-                  :step="10"
-                  size="small"
-                  controls-position="right"
-                  @change="(value, oldValue) => changeAmount(row, value as number, oldValue as number)"
-                />
-              </div>
-            </template>
-            <template v-else>
-              {{ formatAmountValue(row.amount) }}
-            </template>
           </template>
         </el-table-column>
         <el-table-column prop="status" label="状态" width="160">
@@ -185,7 +162,7 @@
         v-if="isAdmin"
         v-model:current-page="filters.page"
         v-model:page-size="filters.size"
-        :page-sizes="[10, 20, 50]"
+        :page-sizes="[20, 50, 100, 200]"
         layout="total, sizes, prev, pager, next"
         :total="total"
         background
@@ -230,9 +207,6 @@
         <el-form-item label="SN">
           <el-input v-model="editDialog.form.sn" />
         </el-form-item>
-        <el-form-item label="金额">
-          <el-input-number v-model="editDialog.form.amount" :min="0" :step="10" />
-        </el-form-item>
         <el-form-item label="状态">
           <el-select v-model="editDialog.form.status" placeholder="请选择">
             <el-option v-for="item in statusOptions" :key="item.value" :label="item.label" :value="item.value" />
@@ -247,20 +221,30 @@
         <el-button type="primary" :loading="editDialog.loading" @click="submitEdit">保存</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog
+      v-model="importProgress.visible"
+      title="批量导入中"
+      width="360px"
+      :show-close="false"
+      align-center
+    >
+      <p class="muted" style="margin-bottom: 12px">正在上传并解析文件，请稍候…</p>
+      <el-progress :percentage="importProgress.percent" :stroke-width="12" status="success" />
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue';
+import { computed, reactive, ref, watch, onBeforeUnmount } from 'vue';
 import type { FormInstance, FormRules } from 'element-plus';
 import { ElMessage } from 'element-plus';
-import { fetchOrders, createOrder, importOrders, fetchByTracking, updateOrderStatus, searchOrders, updateOrderAmount, fetchCategoryStats } from '@/api/orders';
+import { fetchOrders, fetchOrdersWithConfig, createOrder, importOrders, updateOrderStatus, searchOrders, fetchCategoryStats } from '@/api/orders';
 import type { OrderCategoryStats, OrderCreateRequest, OrderRecord, OrderUpdateRequest } from '@/types/models';
 import { useAuthStore } from '@/store/auth';
 
 interface FilterModel {
   dateRange: string[];
-  category: string;
   status: string;
   keyword: string;
   page: number;
@@ -273,14 +257,29 @@ const statusOptions = [
   { label: '已打款', value: 'PAID', tag: 'success' }
 ] as const;
 
+const PAGE_SIZE_KEY = 'orders-page-size';
+const savedPageSize = Number(localStorage.getItem(PAGE_SIZE_KEY)) || 50;
+
 const filters = reactive<FilterModel>({
   dateRange: [],
-  category: '',
   status: '',
   keyword: '',
   page: 1,
-  size: 20
+  size: Number.isNaN(savedPageSize) ? 50 : savedPageSize
 });
+
+const EXCEL_PREFIX_PATTERN = /^[='‘’“”"`\u200B-\u200F\uFEFF]+/;
+const EXCEL_PREFIX_MULTILINE_PATTERN = /^[='‘’“”"`\u200B-\u200F\uFEFF]+/gm;
+
+const sanitizeSingleInput = (value?: string) => {
+  if (!value) return '';
+  return value.replace(EXCEL_PREFIX_PATTERN, '').trim();
+};
+
+const sanitizeMultilineInput = (value?: string) => {
+  if (!value) return '';
+  return value.replace(EXCEL_PREFIX_MULTILINE_PATTERN, '');
+};
 
 const auth = useAuthStore();
 const isAdmin = computed(() => auth.user?.role === 'ADMIN');
@@ -288,14 +287,21 @@ const orders = ref<OrderRecord[]>([]);
 const userOrders = ref<OrderRecord[]>([]);
 const total = ref(0);
 const loading = ref(false);
+type DiffNotice = {
+  trackingNumber: string;
+  message: string;
+  before?: Partial<OrderRecord>;
+  after?: Partial<OrderRecord>;
+};
+const diffNotices = ref<DiffNotice[]>([]);
 const userSearchInput = ref('');
 const userSearchLoading = ref(false);
+const userSearchDebounce = ref<number | null>(null);
+const adminSearchDebounce = ref<number | null>(null);
 const tableData = computed(() => (isAdmin.value ? orders.value : userOrders.value));
 const tableLoading = computed(() => (isAdmin.value ? loading.value : userSearchLoading.value));
 const USER_HISTORY_KEY = 'user-order-history';
 const quickStatus = ref('');
-const quickCategory = ref('');
-const categoryStats = ref<OrderCategoryStats[]>([]);
 const duplicateSnSet = computed(() => {
   const counts = new Map<string, number>();
   tableData.value.forEach(order => {
@@ -308,26 +314,13 @@ const duplicateSnSet = computed(() => {
 const filteredTableData = computed(() =>
   tableData.value.filter(order => {
     const statusMatch = !quickStatus.value || order.status === quickStatus.value;
-    const categoryName = order.category && order.category.trim().length > 0 ? order.category : '未分配';
-    const categoryMatch = !quickCategory.value || categoryName === quickCategory.value;
-    return statusMatch && categoryMatch;
+    return statusMatch;
   })
 );
-const categoryChips = computed(() =>
-  categoryStats.value.map(item => ({
-    name: item.category || '未分配',
-    count: item.count
-  }))
-);
-
 const isSnDuplicate = (sn?: string) => {
   if (!sn) return false;
   return duplicateSnSet.value.has(sn);
 };
-
-const batchNumbers = ref('');
-const manualAmount = ref<number | null>(null);
-const batchLoading = ref(false);
 
 const createVisible = ref(false);
 const createLoading = ref(false);
@@ -348,12 +341,17 @@ const createRules: FormRules<OrderCreateRequest> = {
 };
 
 const fileInput = ref<HTMLInputElement>();
+const importProgress = reactive({
+  visible: false,
+  percent: 0,
+  timer: null as number | null
+});
 
 const editDialog = reactive({
   visible: false,
   loading: false,
   targetId: 0,
-  form: { trackingNumber: '', model: '', sn: '', amount: 0, status: '', remark: '' } as OrderUpdateRequest & { amount?: number }
+  form: { trackingNumber: '', model: '', sn: '', status: '', remark: '' } as OrderUpdateRequest
 });
 
 const statusLabel = (value?: string) => {
@@ -365,12 +363,6 @@ const statusTagType = (value?: string) => {
   const match = statusOptions.find(item => item.value === value);
   return (match?.tag as string) ?? 'info';
 };
-const formatAmountValue = (value?: number) => {
-  if (value === undefined || value === null) {
-    return '-';
-  }
-  return `￥${value.toFixed(2)}`;
-};
 
 const setStatusFilter = async (value: string) => {
   quickStatus.value = quickStatus.value === value ? '' : value;
@@ -381,21 +373,11 @@ const setStatusFilter = async (value: string) => {
   }
 };
 
-const setCategoryFilter = async (value: string) => {
-  quickCategory.value = quickCategory.value === value ? '' : value;
-  if (isAdmin.value) {
-    filters.category = quickCategory.value;
-    filters.page = 1;
-    await loadOrders();
-  }
-};
-
 const queryParams = computed(() => {
   const params: any = {
     page: filters.page,
     size: filters.size,
     keyword: filters.keyword || undefined,
-    category: filters.category || undefined,
     status: filters.status || undefined
   };
   if (filters.dateRange.length === 2) {
@@ -427,7 +409,6 @@ const loadOrders = async () => {
     const data = await fetchOrders(queryParams.value);
     orders.value = data.records;
     total.value = data.total;
-    await loadCategoryStats();
   } finally {
     loading.value = false;
   }
@@ -438,8 +419,29 @@ const handleSearch = () => {
   loadOrders();
 };
 
+const triggerAdminAutoSearch = () => {
+  if (!isAdmin.value) return;
+  if (adminSearchDebounce.value) {
+    clearTimeout(adminSearchDebounce.value);
+  }
+  adminSearchDebounce.value = window.setTimeout(() => {
+    filters.page = 1;
+    loadOrders();
+  }, 300);
+};
+
+const handleKeywordInput = (value: string) => {
+  filters.keyword = sanitizeSingleInput(value);
+  triggerAdminAutoSearch();
+};
+
+const handleUserSearchInput = (value: string) => {
+  userSearchInput.value = sanitizeMultilineInput(value);
+};
+
 const handleSizeChange = (size: number) => {
   filters.size = size;
+  localStorage.setItem(PAGE_SIZE_KEY, String(size));
   filters.page = 1;
   loadOrders();
 };
@@ -451,12 +453,10 @@ const handlePageChange = (page: number) => {
 
 const resetFilters = () => {
   filters.dateRange = [];
-  filters.category = '';
   filters.status = '';
   filters.keyword = '';
   filters.page = 1;
   quickStatus.value = '';
-  quickCategory.value = '';
   loadOrders();
 };
 
@@ -465,39 +465,69 @@ const triggerImport = () => {
   fileInput.value?.click();
 };
 
+const fetchAllOrders = async () => {
+  const pageSize = 500;
+  let page = 1;
+  const all: OrderRecord[] = [];
+  while (true) {
+    const data = await fetchOrdersWithConfig({ page, size: pageSize }, { timeout: 60000 });
+    all.push(...data.records);
+    if (data.records.length < pageSize) break;
+    page += 1;
+  }
+  return all;
+};
+
+const captureDiffSnapshot = async () => {
+  const all = await fetchAllOrders();
+  return buildOrderSnapshot(all);
+};
+
+const startImportProgress = () => {
+  importProgress.visible = true;
+  importProgress.percent = 10;
+  if (importProgress.timer) {
+    clearInterval(importProgress.timer);
+  }
+  importProgress.timer = window.setInterval(() => {
+    if (importProgress.percent < 90) {
+      importProgress.percent += 10;
+    }
+  }, 300);
+};
+
+const finishImportProgress = () => {
+  if (importProgress.timer) {
+    clearInterval(importProgress.timer);
+    importProgress.timer = null;
+  }
+  importProgress.percent = 100;
+  setTimeout(() => {
+    importProgress.visible = false;
+    importProgress.percent = 0;
+  }, 400);
+};
+
 const handleFileChange = async (event: Event) => {
   if (!isAdmin.value) return;
   const target = event.target as HTMLInputElement;
   const file = target.files?.[0];
   if (!file) return;
+  startImportProgress();
+  const prevSnapshot = await captureDiffSnapshot().catch(() => new Map());
   try {
-    await importOrders(file);
+    const report = await importOrders(file);
     ElMessage.success('导入成功');
+    const latest = await fetchAllOrders().catch(() => []);
+    appendDiffNotices([
+      ...computeDifferences(prevSnapshot, latest),
+      ...computeSnConflicts(latest),
+      ...buildSnDuplicateNotices(report?.duplicateSnDetail)
+    ]);
     loadOrders();
   } finally {
+    finishImportProgress();
     target.value = '';
-  }
-};
-
-const handleBatchFetch = async () => {
-  if (!isAdmin.value) return;
-  const list = batchNumbers.value
-    .split(/\n|,|;/)
-    .map(item => item.trim())
-    .filter(Boolean);
-  if (list.length === 0) {
-    ElMessage.warning('请先输入单号');
-    return;
-  }
-  batchLoading.value = true;
-  try {
-    await fetchByTracking({ trackingNumbers: list, manualAmount: manualAmount.value ?? undefined });
-    ElMessage.success('批量处理完成');
-    batchNumbers.value = '';
-    manualAmount.value = null;
-    loadOrders();
-  } finally {
-    batchLoading.value = false;
   }
 };
 
@@ -512,7 +542,6 @@ const openEditDialog = (row: OrderRecord) => {
   editDialog.form.trackingNumber = row.trackingNumber;
   editDialog.form.model = row.model ?? '';
   editDialog.form.sn = row.sn ?? '';
-  editDialog.form.amount = row.amount ?? 0;
   editDialog.form.status = row.status ?? '';
   editDialog.form.remark = row.remark ?? '';
   editDialog.visible = true;
@@ -544,6 +573,12 @@ const submitCreate = async () => {
       currency: 'CNY',
       orderTime: undefined
     });
+    const prevSnapshot = await captureDiffSnapshot().catch(() => new Map());
+    const latest = await fetchAllOrders().catch(() => []);
+    appendDiffNotices([
+      ...computeDifferences(prevSnapshot, latest),
+      ...computeSnConflicts(latest)
+    ]);
     loadOrders();
   } finally {
     createLoading.value = false;
@@ -566,73 +601,223 @@ const formatDateTime = (value?: string) => {
   return value.replace('T', ' ').replace('Z', '');
 };
 
-const changeAmount = async (row: OrderRecord, value: number, previous?: number) => {
-  if (!isAdmin.value || Number.isNaN(value)) return;
-  const oldValue = previous ?? row.amount ?? 0;
-  try {
-    await updateOrderAmount(row.id, { amount: value });
-    row.amount = value;
-    row.currency = 'CNY';
-    ElMessage.success('金额已更新');
-  } catch (error) {
-    row.amount = oldValue;
-    console.error(error);
+const buildOrderSnapshot = (list: OrderRecord[]) => {
+  const map = new Map<string, Partial<OrderRecord>>();
+  list.forEach(item => {
+    const key = buildOrderKey(item);
+    if (!key) return;
+    map.set(key, {
+      trackingNumber: item.trackingNumber,
+      model: item.model,
+      sn: item.sn,
+      amount: item.amount
+    });
+  });
+  return map;
+};
+
+const computeDifferences = (prevMap: Map<string, Partial<OrderRecord>>, nextList: OrderRecord[]) => {
+  if (!prevMap.size) return [];
+  const fieldLabels: Record<string, string> = {
+    trackingNumber: '运单号',
+    model: '型号',
+    sn: 'SN'
+  };
+  const notices: { trackingNumber: string; message: string; before?: Partial<OrderRecord>; after?: Partial<OrderRecord> }[] = [];
+  nextList.forEach(order => {
+    const key = buildOrderKey(order);
+    const prev = prevMap.get(key);
+    if (!prev) {
+      return;
+    }
+    const changed: string[] = [];
+    const normalizeVal = (val: unknown) => {
+      if (val === null || val === undefined) return '';
+      if (typeof val === 'string') return val.trim();
+      return String(val);
+    };
+    const before: Partial<OrderRecord> = {};
+    const after: Partial<OrderRecord> = {};
+    Object.keys(fieldLabels).forEach(field => {
+      const prevVal = (prev as any)[field];
+      const currVal = (order as any)[field];
+      if (normalizeVal(prevVal) !== normalizeVal(currVal)) {
+        changed.push(fieldLabels[field]);
+        (before as any)[field] = prevVal;
+        (after as any)[field] = currVal;
+      }
+    });
+    if (changed.length) {
+      notices.push({
+        trackingNumber: order.trackingNumber ?? key,
+        message: `字段变更：${changed.join('、')}`,
+        before,
+        after
+      });
+    }
+  });
+  // 同一运单号只保留一条提醒
+  const dedup: Record<string, typeof notices[number]> = {};
+  notices.forEach(item => {
+    const k = (item.trackingNumber ?? '').toUpperCase();
+    if (!dedup[k]) {
+      dedup[k] = item;
+    }
+  });
+  return Object.values(dedup).slice(0, 20); // 避免一次性展示过多
+};
+
+const removeDiffNotice = (trackingNumber: string) => {
+  diffNotices.value = diffNotices.value.filter(item => item.trackingNumber !== trackingNumber);
+};
+
+const buildOrderKey = (order: OrderRecord) => {
+  if (order.id) return `ID-${order.id}`;
+  if (!order.trackingNumber) return '';
+  return order.trackingNumber.trim().toUpperCase();
+};
+
+const diffFields = (item: DiffNotice) => {
+  const fields: { key: keyof OrderRecord; label: string }[] = [
+    { key: 'trackingNumber', label: '运单号' },
+    { key: 'model', label: '型号' },
+    { key: 'sn', label: 'SN' }
+  ];
+  return fields
+    .filter(({ key }) => {
+      const beforeVal = (item.before as any)?.[key];
+      const afterVal = (item.after as any)?.[key];
+      return String(beforeVal ?? '') !== String(afterVal ?? '');
+    })
+    .map(f => f.label);
+};
+
+const formatDiffValue = (obj: Partial<OrderRecord> | undefined, label: string) => {
+  if (!obj) return '-';
+  const map: Record<string, keyof OrderRecord> = {
+    '运单号': 'trackingNumber',
+    '型号': 'model',
+    'SN': 'sn'
+  };
+  const key = map[label];
+  const val = key ? (obj as any)[key] : undefined;
+  return val === undefined || val === null || val === '' ? '-' : val;
+};
+
+const appendDiffNotices = (notices: DiffNotice[]) => {
+  if (!notices.length) return;
+  diffNotices.value = [...diffNotices.value, ...notices];
+};
+
+const computeSnConflicts = (orders: OrderRecord[]) => {
+  const map = new Map<string, OrderRecord[]>();
+  orders.forEach(order => {
+    const sn = order.sn?.trim();
+    if (!sn) return;
+    map.set(sn, [...(map.get(sn) ?? []), order]);
+  });
+  const conflicts: DiffNotice[] = [];
+  map.forEach((list, sn) => {
+    if (list.length > 1) {
+      const trackingNums = list.map(item => item.trackingNumber).filter(Boolean).join('、');
+      conflicts.push({
+        trackingNumber: trackingNums || '多条记录',
+        message: `SN 重复：${sn}`,
+        before: {},
+        after: {}
+      });
+    }
+  });
+  return conflicts;
+};
+
+const buildSnDuplicateNotices = (snDetail?: Record<string, string[]>) => {
+  if (!snDetail) return [];
+  const notices: DiffNotice[] = [];
+  Object.entries(snDetail).forEach(([sn, trackings]) => {
+    const list = (trackings || []).filter(Boolean).join('、');
+    notices.push({
+      trackingNumber: list || 'SN重复',
+      message: `SN 重复会按照数据库SN最后显示的位置去录入,：${sn}`,
+      before: {},
+      after: {}
+    });
+  });
+  return notices;
+};
+
+const exportDiffNotices = () => {
+  if (!diffNotices.value.length) {
+    ElMessage.info('暂无可导出的变更提醒');
+    return;
   }
+  const headers = ['运单号', '变更字段', '旧值', '新值'];
+  const rows: string[][] = [];
+  diffNotices.value.forEach(item => {
+    const fields = diffFields(item);
+    if (!fields.length) return;
+    fields.forEach(label => {
+      rows.push([
+        item.trackingNumber,
+        label,
+        formatDiffValue(item.before, label),
+        formatDiffValue(item.after, label)
+      ]);
+    });
+  });
+  if (!rows.length) {
+    ElMessage.info('暂无可导出的变更提醒');
+    return;
+  }
+  const csv = [headers, ...rows]
+    .map(cols => cols.map(col => `"${String(col ?? '').replace(/"/g, '""')}"`).join(','))
+    .join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `order-diff-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  window.URL.revokeObjectURL(url);
 };
 
 const submitEdit = async () => {
   if (!editDialog.targetId) return;
   editDialog.loading = true;
+    const prevSnapshot = await captureDiffSnapshot().catch(() => new Map());
   try {
     const payload: OrderUpdateRequest = {
       trackingNumber: editDialog.form.trackingNumber,
       model: editDialog.form.model,
       sn: editDialog.form.sn,
-      amount: editDialog.form.amount,
       status: editDialog.form.status,
       remark: editDialog.form.remark
     };
-    const updated = await updateOrder(editDialog.targetId, payload);
-    const target = orders.value.find(order => order.id === editDialog.targetId);
-    if (target) {
-      Object.assign(target, updated);
-    }
+    await updateOrder(editDialog.targetId, payload);
+    const latest = await fetchAllOrders();
+    appendDiffNotices(computeDifferences(prevSnapshot, latest));
     editDialog.visible = false;
     ElMessage.success('已更新');
     await loadCategoryStats();
+    loadOrders();
   } finally {
     editDialog.loading = false;
   }
 };
 
-const loadCategoryStats = async () => {
-  if (isAdmin.value) {
-    try {
-      const params = buildFilterPayload();
-      categoryStats.value = await fetchCategoryStats(params);
-    } catch (error) {
-      console.error('Failed to load category stats', error);
-    }
-  } else {
-    const stats = new Map<string, number>();
-    tableData.value.forEach(order => {
-      const key = order.category && order.category.trim().length > 0 ? order.category : '未分配';
-      stats.set(key, (stats.get(key) ?? 0) + 1);
-    });
-    categoryStats.value = Array.from(stats.entries()).map(([category, count]) => ({ category, count }));
-  }
-  if (quickCategory.value && !categoryStats.value.some(stat => (stat.category || '未分配') === quickCategory.value)) {
-    quickCategory.value = '';
-  }
-};
+const getRecordKey = (record: OrderRecord) => record.sn || record.trackingNumber || '';
 
-const handleUserSearch = async () => {
+const handleUserSearch = async (silent = false) => {
   const list = userSearchInput.value
     .split(/\n|,|;/)
-    .map(item => item.trim())
+    .map(item => sanitizeSingleInput(item))
     .filter(Boolean);
   if (!list.length) {
-    ElMessage.warning('请先输入单号');
+    if (!silent) {
+      ElMessage.warning('请先输入单号或 SN');
+    } else {
+      userOrders.value = [];
+    }
     return;
   }
   userSearchLoading.value = true;
@@ -644,13 +829,15 @@ const handleUserSearch = async () => {
     }
     const map = new Map<string, OrderRecord>();
     userOrders.value.forEach(record => {
-      if (record.trackingNumber) {
-        map.set(record.trackingNumber, record);
+      const key = getRecordKey(record);
+      if (key) {
+        map.set(key, record);
       }
     });
     results.forEach(record => {
-      if (record.trackingNumber) {
-        map.set(record.trackingNumber, record);
+      const key = getRecordKey(record);
+      if (key) {
+        map.set(key, record);
       }
     });
     userOrders.value = Array.from(map.values());
@@ -669,7 +856,7 @@ const clearUserResults = () => {
 
 const exportUserOrders = () => {
   if (!userOrders.value.length) return;
-  const headers = ['下单日期', '运单号', '型号', 'SN', '分类', '金额', '币种', '状态', '备注', '创建人'];
+  const headers = ['下单日期', '运单号', '型号', 'SN', '分类', '状态', '备注', '创建人'];
   const csvRows = [headers.join(',')];
   userOrders.value.forEach(order => {
     csvRows.push([
@@ -678,8 +865,6 @@ const exportUserOrders = () => {
       order.model ?? '',
       order.sn ?? '',
       order.category ?? '',
-      order.amount ?? '',
-      order.currency ?? '',
       statusLabel(order.status),
       order.remark ?? '',
       order.createdBy ?? ''
@@ -702,6 +887,23 @@ watch(isAdmin, value => {
   }
 }, { immediate: true });
 
+watch(userSearchInput, value => {
+  if (userSearchDebounce.value) {
+    clearTimeout(userSearchDebounce.value);
+  }
+  if (!value || !value.trim()) {
+    userOrders.value = [];
+    return;
+  }
+  userSearchDebounce.value = window.setTimeout(() => {
+    handleUserSearch(true);
+  }, 400);
+});
+
+watch(() => filters.status, triggerAdminAutoSearch);
+watch(() => filters.keyword, triggerAdminAutoSearch);
+watch(() => filters.dateRange, triggerAdminAutoSearch, { deep: true });
+
 function loadUserOrders() {
   try {
     const cached = localStorage.getItem(USER_HISTORY_KEY);
@@ -721,6 +923,12 @@ function saveUserOrders() {
     console.warn('Failed to persist user orders', error);
   }
 }
+
+onBeforeUnmount(() => {
+  if (importProgress.timer) {
+    clearInterval(importProgress.timer);
+  }
+});
 </script>
 
 <style scoped>
@@ -791,14 +999,21 @@ function saveUserOrders() {
   cursor: pointer;
 }
 
-.amount-cell {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+.diff-card {
+  margin-top: 16px;
 }
 
-.currency-label {
-  font-size: 14px;
-  color: #303133;
+.diff-list {
+  margin: 0;
+  padding-left: 16px;
+  color: var(--text-muted);
 }
+
+.diff-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 </style>

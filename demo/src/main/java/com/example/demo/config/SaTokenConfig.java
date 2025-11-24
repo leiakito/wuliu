@@ -10,10 +10,11 @@ public class SaTokenConfig {
     @Bean
     public SaServletFilter saServletFilter() {
         return new SaServletFilter()
-            .addInclude("/api/**")
-            .addExclude("/api/auth/login")
+            .addInclude("/api/**")// /api 开头的接口都需要经过权限校验。
+            .addExclude("/api/auth/login")//放开接口
             .setAuth(obj -> {
                 // 统一权限交给注解处理
+                //SaCheckLogin  @SaCheckRole("admin") @SaCheckPermission("user.add")
             });
     }
 }

@@ -54,7 +54,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { Document, House, Tickets, User, Memo, ArrowDown, Menu, EditPen, Bell } from '@element-plus/icons-vue';
+import { Document, House, Tickets, User, Memo, ArrowDown, Menu, EditPen, DataAnalysis } from '@element-plus/icons-vue';
 import { useAuthStore } from '@/store/auth';
 import SidebarMenu from '@/components/SidebarMenu.vue';
 import type { NavItem } from '@/types/navigation';
@@ -68,11 +68,12 @@ const drawerVisible = ref(false);
 
 const baseMenus: NavItem[] = [
   { label: '单号总查询', path: '/dashboard', icon: House },
-  { label: '系统公告', path: '/announcements', icon: Bell },
   { label: '物流单号', path: '/orders', icon: Document, roles: ['ADMIN'] },
   { label: '单号提交', path: '/user-submissions', icon: EditPen },
   { label: '硬件价格', path: '/hardware-prices', icon: Tickets },
+  { label: '价格分析', path: '/hardware-analytics', icon: DataAnalysis },
   { label: '结账管理', path: '/settlements', icon: Tickets, roles: ['ADMIN'] },
+  { label: '提交记录', path: '/submission-logs', icon: Document, roles: ['ADMIN'] },
   { label: '用户管理', path: '/users', icon: User, roles: ['ADMIN'] },
   { label: '操作日志', path: '/logs', icon: Memo, roles: ['ADMIN'] }
 ];

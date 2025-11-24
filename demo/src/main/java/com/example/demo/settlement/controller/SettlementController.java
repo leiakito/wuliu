@@ -7,6 +7,9 @@ import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.example.demo.common.annotation.LogOperation;
 import com.example.demo.common.response.ApiResponse;
 import com.example.demo.common.response.PageResponse;
+import com.example.demo.settlement.dto.SettlementAmountRequest;
+import com.example.demo.settlement.dto.SettlementBatchConfirmRequest;
+import com.example.demo.settlement.dto.SettlementBatchPriceRequest;
 import com.example.demo.settlement.dto.SettlementConfirmRequest;
 import com.example.demo.settlement.dto.SettlementExportRequest;
 import com.example.demo.settlement.dto.SettlementFilterRequest;
@@ -55,6 +58,35 @@ public class SettlementController {
         @Parameter(description = "待确认的结算记录 ID", required = true) @PathVariable Long id,
         @Valid @RequestBody SettlementConfirmRequest request) {
         settlementService.confirm(id, request, StpUtil.getLoginIdAsString());
+        return ApiResponse.ok();
+    }
+
+    @PutMapping("/{id}/amount")
+    @SaCheckRole("ADMIN")
+    @LogOperation("修改结算金额")
+    @Operation(summary = "修改单条结算金额", description = "同步更新关联订单金额")
+    public ApiResponse<Void> updateAmount(
+        @Parameter(description = "结算记录 ID", required = true) @PathVariable Long id,
+        @Valid @RequestBody SettlementAmountRequest request) {
+        settlementService.updateAmount(id, request);
+        return ApiResponse.ok();
+    }
+
+    @PutMapping("/price-by-model")
+    @SaCheckRole("ADMIN")
+    @LogOperation("批量设置结算金额")
+    @Operation(summary = "按型号批量设置金额", description = "针对同一型号的结算记录批量设置金额")
+    public ApiResponse<Integer> updatePriceByModel(@Valid @RequestBody SettlementBatchPriceRequest request) {
+        int updated = settlementService.updateAmountByModel(request);
+        return ApiResponse.ok(updated);
+    }
+
+    @PutMapping("/confirm-batch")
+    @SaCheckRole("ADMIN")
+    @LogOperation("批量确认结账")
+    @Operation(summary = "批量确认", description = "批量确认所选结算记录，金额可选统一设置")
+    public ApiResponse<Void> confirmBatch(@Valid @RequestBody SettlementBatchConfirmRequest request) {
+        settlementService.confirmBatch(request, StpUtil.getLoginIdAsString());
         return ApiResponse.ok();
     }
 

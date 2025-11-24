@@ -1,0 +1,1 @@
+import{y as i}from"./index-xnLysfLr.js";const t=s=>i.post("/user-submissions",s),n=s=>i.post("/user-submissions/batch",s),u=s=>i.get("/user-submissions/mine",{params:s}),e=s=>i.get("/user-submissions",{params:s}),m=s=>i.get("/user-submission-logs",{params:s});export{u as a,n as b,m as c,e as f,t as s};

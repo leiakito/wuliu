@@ -7,8 +7,8 @@
     USE logistics;
 
     -- 删除旧表（注意依赖顺序）
-    DROP TABLE IF EXISTS announcement;
     DROP TABLE IF EXISTS settlement_record;
+    DROP TABLE IF EXISTS user_submission_log;
     DROP TABLE IF EXISTS user_submission;
     DROP TABLE IF EXISTS hardware_price;
     DROP TABLE IF EXISTS order_record;
@@ -51,14 +51,15 @@
                                   updated_at      DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                                   deleted         TINYINT         NOT NULL DEFAULT 0,
                                   UNIQUE KEY uk_order_sn(sn),
-                                  INDEX idx_order_date(order_date),
-                                  INDEX idx_order_status(status)
+                                  INDEX idx_order_date(order_date),  -- 索引提高查询速度
+                                  INDEX idx_order_status(status)-- 索引提高查询速度
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
     -- 用户提交单号表
     CREATE TABLE user_submission (
                                      id               BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
                                      username         VARCHAR(64)     NOT NULL,
+                                     owner_username   VARCHAR(64),
                                      tracking_number  VARCHAR(64)     NOT NULL,
                                      status           VARCHAR(32)     NOT NULL DEFAULT 'PENDING',
                                      amount           DECIMAL(15,2),
@@ -72,14 +73,22 @@
                                      INDEX idx_submission_date(submission_date)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+    -- 用户提交原文记录表
+    CREATE TABLE user_submission_log (
+                                        id          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                                        username    VARCHAR(64)     NOT NULL,
+                                        content     TEXT            NOT NULL,
+                                        created_at  DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                                        INDEX idx_submission_log_user(username),
+                                        INDEX idx_submission_log_created(created_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
     -- 硬件价格表
     CREATE TABLE hardware_price (
                                     id           BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
                                     price_date   DATE            NOT NULL,
                                     item_name    VARCHAR(128)    NOT NULL,
-                                    category     VARCHAR(64),
                                     price        DECIMAL(15,2)   NOT NULL,
-                                    remark       VARCHAR(255),
                                     created_by   VARCHAR(64),
                                     created_at   DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
                                     updated_at   DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -104,6 +113,8 @@
                                        remark          VARCHAR(255),
                                        confirmed_by    VARCHAR(64),
                                        confirmed_at    DATETIME,
+                                       owner_username  VARCHAR(64),
+                                       order_time      DATETIME,
                                        created_at      DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
                                        updated_at      DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                                        deleted         TINYINT         NOT NULL DEFAULT 0,
@@ -123,19 +134,10 @@
                              INDEX idx_sys_log_username(username)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-    -- 公告表
-    CREATE TABLE announcement (
-                                  id          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
-                                  title       VARCHAR(128)    NOT NULL,
-                                  content     TEXT            NOT NULL,
-                                  created_by  VARCHAR(64),
-                                  created_at  DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
-    -- 初始用户数据（密码: admin123 / operator123，对应 BCrypt 密文）
+    -- 初始用户数据（密码: suixiang / operator123，对应 BCrypt 密文）
     INSERT INTO sys_user (username, password, role, status, full_name)
     VALUES
-        ('admin', '$2y$10$46TOaWf6.9LibwU9HD/YpOdRYB2LxMP31TutDnPVkvrYg9G/15kk2', 'ADMIN', 'ENABLED', '系统管理员'),
+        ('admin', '$2y$10$/wsz6itJhMn8MvHRVarZFurfAsbIRpVlCnfoLTvx0oCeiyaGEakey', 'ADMIN', 'ENABLED', '系统管理员'),
         ('operator', '$2y$10$/wsz6itJhMn8MvHRVarZFurfAsbIRpVlCnfoLTvx0oCeiyaGEakey', 'USER', 'ENABLED', '普通用户');
 
     # -- 初始订单样例
@@ -145,15 +147,26 @@
     #     (DATE_SUB(CURDATE(), INTERVAL 1 DAY), DATE_SUB(NOW(), INTERVAL 1 DAY), 'YTO9876543210', 'iPad Pro', 'SN-002', '手动录入', '平板', 'NOT_RECEIVED', 215.00, 'CNY', 0.8, '李四', 'operator', 1),
     #     (CURDATE(), NOW(), 'DHL0000000001', 'MacBook Air', 'SN-003', '海外渠道', '电脑', 'PAID', 650.00, 'USD', 1.2, 'ACME HK', 'admin', 1);
 
-    -- 硬件价格样例
-    INSERT INTO hardware_price (price_date, item_name, category, price, remark, created_by)
-    VALUES
-        (CURRENT_DATE, 'CPU i9-14900K', 'CPU', 4299.00, '盒装原厂', 'admin'),
-        (CURRENT_DATE, 'GPU RTX 4090', 'GPU', 12999.00, '旗舰显卡', 'admin'),
-        (CURRENT_DATE, '技嘉 Z890 主板', '主板', 2599.00, 'WiFi 版本', 'admin'),
-        (DATE_SUB(CURRENT_DATE, INTERVAL 1 DAY), 'CPU i9-14900K', 'CPU', 4399.00, '昨日报价', 'admin');
-
-    # -- 订单对应的结账数据
+#     -- 硬件价格样例
+#     INSERT INTO hardware_price (price_date, item_name, price, created_by)
+#     VALUES
+#         (CURRENT_DATE, 'CPU i9-14900KF', 4099.00, 'admin'),
+#         (CURRENT_DATE, 'CPU i7-14700K', 2899.00, 'admin'),
+#         (CURRENT_DATE, 'CPU Ryzen 9 7950X', 4499.00, 'admin'),
+#         (CURRENT_DATE, 'CPU Ryzen 7 7800X3D', 2999.00, 'admin'),
+#         (CURRENT_DATE, '华硕 ROG Z790 HERO', 4999.00, 'admin'),
+#         (CURRENT_DATE, '微星 B760M 迫击炮 WIFI', 1299.00, 'admin'),
+#         (CURRENT_DATE, '技嘉 B650 AORUS ELITE', 1599.00, 'admin'),
+#         (CURRENT_DATE, 'RTX 4070 SUPER', 4499.00, 'admin'),
+#         (CURRENT_DATE, 'RTX 4070 Ti SUPER', 5999.00, 'admin'),
+#         (CURRENT_DATE, 'RX 7900 XTX', 6999.00, 'admin'),
+#         (CURRENT_DATE, '金士顿 32GB DDR5 6000', 799.00, 'admin'),
+#         (CURRENT_DATE, '海盗船 32GB DDR5 6000 RGB', 899.00, 'admin'),
+#         (CURRENT_DATE, '芝奇 64GB DDR5 6000', 1599.00, 'admin'),
+#         (CURRENT_DATE, '三星 990 PRO 1TB', 799.00, 'admin'),
+#         (CURRENT_DATE, '西数 SN850X 1TB', 749.00, 'admin'),
+#         (CURRENT_DATE, '海康威视 C4000 2TB', 899.00, 'admin');
+        # -- 订单对应的结账数据
     # INSERT INTO settlement_record (order_id, tracking_number, model, amount, currency, manual_input, status, warning, settle_batch, payable_at, remark)
     # VALUES
     #     (1, 'SF1234567890', 'iPhone 15', 120.00, 'CNY', 0, 'PENDING', 0, NULL, NULL, '自动待结账'),
@@ -166,8 +179,3 @@
         ('admin', 'LOGIN', '管理员登录系统', '127.0.0.1'),
         ('admin', 'IMPORT_ORDER', '批量导入 50 条订单', '127.0.0.1'),
         ('operator', 'GENERATE_SETTLEMENT', '生成 2 条待结账', '127.0.0.1');
-
-    -- 公告样例
-    INSERT INTO announcement (title, content, created_by)
-    VALUES
-        ('系统维护通知', '本周日 02:00-04:00 将进行系统维护，期间服务暂停，请提前安排相关操作。', 'admin');

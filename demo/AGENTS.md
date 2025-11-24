@@ -1,7 +1,7 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-Source lives in `src/main/java/com/example/demo`, split by feature domains (`announcement`, `auth`, `hardware`, `order`, `report`, `settlement`, `submission`). Shared DTOs and utilities stay in `common`; security, Sa-Token, and cache wiring live in `config`. Persisted SQL/XML and migration scripts belong with their module or `src/main/resources/db`. Static files and Thymeleaf templates live in `src/main/resources/static` and `templates`, while `application.yml` carries sane defaults that teams override per profile. Tests mirror this tree under `src/test/java`.
+Source lives in `src/main/java/com/example/demo`, split by feature domains (`auth`, `hardware`, `order`, `report`, `settlement`, `submission`). Shared DTOs and utilities stay in `common`; security, Sa-Token, and cache wiring live in `config`. Persisted SQL/XML and migration scripts belong with their module or `src/main/resources/db`. Static files and Thymeleaf templates live in `src/main/resources/static` and `templates`, while `application.yml` carries sane defaults that teams override per profile. Tests mirror this tree under `src/test/java`.
 
 ## Build, Test, and Development Commands
 - `./mvnw clean package` — builds the runnable Spring Boot jar into `target/`.

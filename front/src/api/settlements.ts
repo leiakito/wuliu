@@ -4,7 +4,10 @@ import type {
   SettlementRecord,
   SettlementFilterRequest,
   SettlementConfirmRequest,
-  SettlementExportRequest
+  SettlementExportRequest,
+  SettlementBatchPriceRequest,
+  SettlementBatchConfirmRequest,
+  SettlementAmountRequest
 } from '@/types/models';
 
 const serializeParams = (params: SettlementExportRequest) => {
@@ -43,3 +46,12 @@ export const exportSettlements = async (params: SettlementExportRequest) => {
   });
   return response;
 };
+
+export const updateSettlementPriceByModel = (payload: SettlementBatchPriceRequest) =>
+  apiClient.put<void>('/settlements/price-by-model', payload);
+
+export const confirmSettlementsBatch = (payload: SettlementBatchConfirmRequest) =>
+  apiClient.put<void>('/settlements/confirm-batch', payload);
+
+export const updateSettlementAmount = (id: number, payload: SettlementAmountRequest) =>
+  apiClient.put<void>(`/settlements/${id}/amount`, payload);

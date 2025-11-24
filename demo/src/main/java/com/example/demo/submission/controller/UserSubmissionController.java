@@ -6,6 +6,7 @@ import cn.dev33.satoken.stp.StpUtil;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.example.demo.common.response.ApiResponse;
 import com.example.demo.common.response.PageResponse;
+import com.example.demo.submission.dto.UserSubmissionBatchRequest;
 import com.example.demo.submission.dto.UserSubmissionCreateRequest;
 import com.example.demo.submission.dto.UserSubmissionQueryRequest;
 import com.example.demo.submission.entity.UserSubmission;
@@ -13,7 +14,9 @@ import com.example.demo.submission.service.UserSubmissionService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import java.util.List;
 import lombok.RequiredArgsConstructor;
+import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -32,7 +35,18 @@ public class UserSubmissionController {
     @SaCheckLogin
     @Operation(summary = "提交单号", description = "普通用户提交待审核的物流单号")
     public ApiResponse<UserSubmission> submit(@Valid @RequestBody UserSubmissionCreateRequest request) {
-        return ApiResponse.ok(userSubmissionService.create(request, StpUtil.getLoginIdAsString()));
+        String operator = StpUtil.getLoginIdAsString();
+        String targetUser = StringUtils.hasText(request.getUsername()) ? request.getUsername().trim() : operator;
+        return ApiResponse.ok(userSubmissionService.create(request, operator, targetUser));
+    }
+
+    @PostMapping("/batch")
+    @SaCheckLogin
+    @Operation(summary = "批量提交单号")
+    public ApiResponse<List<UserSubmission>> batchSubmit(@Valid @RequestBody UserSubmissionBatchRequest request) {
+        String operator = StpUtil.getLoginIdAsString();
+        String targetUser = StringUtils.hasText(request.getUsername()) ? request.getUsername().trim() : operator;
+        return ApiResponse.ok(userSubmissionService.batchCreate(request, operator, targetUser));
     }
 
     @GetMapping("/mine")

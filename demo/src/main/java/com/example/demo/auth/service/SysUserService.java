@@ -6,6 +6,7 @@ import com.example.demo.auth.dto.UserRequest;
 import com.example.demo.auth.entity.SysUser;
 import java.util.List;
 
+//功能清单
 public interface SysUserService {
 
     LoginResponse login(LoginRequest request);

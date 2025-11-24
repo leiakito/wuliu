@@ -2,25 +2,37 @@ spring:
   application:
     name: logistics-billing
   datasource:
-    url: ${APP_DB_URL:jdbc:mysql://localhost:3306/logistics?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai}
+    url: ${APP_DB_URL:jdbc:mysql://localhost:3306/logistics?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&rewriteBatchedStatements=true&useSSL=false&allowPublicKeyRetrieval=true&cachePrepStmts=true&prepStmtCacheSize=250&prepStmtCacheSqlLimit=2048}
+#   #生产
+#    username: ${APP_DB_USERNAME:logistics}
+#    password: ${APP_DB_PASSWORD:wGwMEsryfXGb8dyd}
+    #开发
     username: ${APP_DB_USERNAME:root}
     password: ${APP_DB_PASSWORD:1234567890}
     driver-class-name: com.mysql.cj.jdbc.Driver
     hikari:
-      maximum-pool-size: 20
-      minimum-idle: 5
+      maximum-pool-size: 30              # 视规模可调整 30~50
+      minimum-idle: 10
+      idle-timeout: 600000              # 10 分钟
+      max-lifetime: 1800000             # 30 分钟
       connection-timeout: 30000
+      pool-name: LogisticsHikariCP
+
   cache:
     type: caffeine
+    caffeine:
+      spec: maximumSize=5000,expireAfterWrite=30m
+
   servlet:
     multipart:
-      max-file-size: 20MB
-      max-request-size: 20MB
+      max-file-size: 50MB
+      max-request-size: 50MB
 
 mybatis-plus:
   configuration:
     map-underscore-to-camel-case: true
-    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+      #生产环境关闭日志log
+     # log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
   global-config:
     db-config:
       logic-delete-field: deleted
@@ -29,17 +41,19 @@ mybatis-plus:
 
 sa-token:
   token-name: Authorization
-  token-style: uuid
+  token-style: simple-uuid     # 性能更高
   timeout: 2592000
   is-log: false
 
 logging:
   level:
-    root: info
-    com.example.demo: debug
+    root: warn                 # 全局 WARN，减少 IO
+    com.example.demo: info     # 业务包 INFO
 
 app:
   settlement:
     warn-double-billing: true
   export:
     max-rows: 10000
+server:
+  port: 8081

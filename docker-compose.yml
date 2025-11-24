@@ -1,0 +1,24 @@
+version: "3.9"
+
+services:
+  backend:
+    build:
+      context: ./demo
+    container_name: logistics-backend
+    environment:
+      APP_DB_URL: "${APP_DB_URL:-jdbc:mysql://host.docker.internal:3306/logistics?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&rewriteBatchedStatements=true&useSSL=false&allowPublicKeyRetrieval=true&cachePrepStmts=true&prepStmtCacheSize=250&prepStmtCacheSqlLimit=2048}"
+      APP_DB_USERNAME: "${APP_DB_USERNAME:-root}"
+      APP_DB_PASSWORD: "${APP_DB_PASSWORD:-1234567890}"
+    expose:
+      - "8080"
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./front
+    container_name: logistics-frontend
+    depends_on:
+      - backend
+    ports:
+      - "8081:80"
+    restart: unless-stopped

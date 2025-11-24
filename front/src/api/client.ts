@@ -4,9 +4,9 @@ import { TOKEN_STORAGE_KEY, USER_STORAGE_KEY } from '@/constants/storage';
 
 const apiClient = axios.create({
   baseURL: '/api',
-  timeout: 20000
+  timeout: 120000
 });
-
+//请求加Token‘ Authorization: <your-token>
 apiClient.interceptors.request.use(config => {
   const token = localStorage.getItem(TOKEN_STORAGE_KEY);
   if (token) {
@@ -15,7 +15,7 @@ apiClient.interceptors.request.use(config => {
   }
   return config;
 });
-
+//判断是否是文件流不处理json
 apiClient.interceptors.response.use(
   response => {
     const contentType = response.headers['content-type'];

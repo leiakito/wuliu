@@ -41,9 +41,7 @@ export interface HardwarePrice {
   id: number;
   priceDate: string;
   itemName: string;
-  category?: string;
   price: number;
-  remark?: string;
   createdBy?: string;
   createdAt?: string;
 }
@@ -51,9 +49,11 @@ export interface HardwarePrice {
 export interface HardwarePriceRequest {
   priceDate: string;
   itemName: string;
-  category?: string;
   price: number;
-  remark?: string;
+}
+
+export interface HardwarePriceBatchRequest {
+  items: HardwarePriceRequest[];
 }
 
 export interface OrderFilterRequest {
@@ -62,6 +62,7 @@ export interface OrderFilterRequest {
   category?: string;
   status?: string;
   keyword?: string;
+  createdBy?: string;
   page?: number;
   size?: number;
 }
@@ -90,6 +91,7 @@ export interface SettlementRecord {
   orderId?: number;
   trackingNumber: string;
   model?: string;
+  orderSn?: string;
   amount?: number;
   currency?: string;
   manualInput?: boolean;
@@ -99,6 +101,8 @@ export interface SettlementRecord {
   payableAt?: string;
   remark?: string;
   createdAt?: string;
+  ownerUsername?: string;
+  orderTime?: string;
   orderStatus?: string;
   orderAmount?: number;
 }
@@ -111,6 +115,10 @@ export interface OrderCategoryStats {
 export interface SettlementFilterRequest {
   status?: string;
   batch?: string;
+  ownerUsername?: string;
+  model?: string;
+  trackingNumber?: string;
+  keyword?: string;
   startDate?: string;
   endDate?: string;
   page?: number;
@@ -127,7 +135,29 @@ export interface SettlementExportRequest {
   endDate?: string;
   status?: string;
   batch?: string;
+  ownerUsername?: string;
   trackingNumbers?: string[];
+}
+
+export interface SettlementBatchPriceRequest {
+  model: string;
+  amount: number;
+  status?: string;
+  batch?: string;
+  ownerUsername?: string;
+  startDate?: string;
+  endDate?: string;
+}
+
+export interface SettlementBatchConfirmRequest {
+  ids: number[];
+  amount?: number;
+  remark?: string;
+}
+
+export interface SettlementAmountRequest {
+  amount: number;
+  remark?: string;
 }
 
 export interface DashboardResponse {
@@ -168,22 +198,10 @@ export interface SysLog {
   createdAt: string;
 }
 
-export interface Announcement {
-  id: number;
-  title: string;
-  content: string;
-  createdBy?: string;
-  createdAt: string;
-}
-
-export interface AnnouncementCreateRequest {
-  title: string;
-  content: string;
-}
-
 export interface UserSubmission {
   id: number;
   username: string;
+  ownerUsername?: string;
   trackingNumber: string;
   status: string;
   amount?: number;
@@ -195,6 +213,7 @@ export interface UserSubmission {
 
 export interface UserSubmissionCreateRequest {
   trackingNumber: string;
+  username?: string;
 }
 
 export interface UserSubmissionQueryRequest {
@@ -203,4 +222,26 @@ export interface UserSubmissionQueryRequest {
   status?: string;
   username?: string;
   trackingNumber?: string;
+}
+
+export interface UserSubmissionBatchRequest {
+  trackingNumbers: string[];
+  rawContent?: string;
+  username?: string;
+}
+
+export interface UserSubmissionLog {
+  id: number;
+  username?: string;
+  content: string;
+  createdAt: string;
+}
+
+export interface SubmissionLogQueryRequest {
+  page?: number;
+  size?: number;
+  username?: string;
+  keyword?: string;
+  startTime?: string;
+  endTime?: string;
 }

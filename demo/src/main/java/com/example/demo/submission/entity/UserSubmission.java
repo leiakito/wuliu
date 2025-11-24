@@ -33,6 +33,11 @@ public class UserSubmission {
 
     private LocalDateTime updatedAt;
 
+    /**
+     * 归属用户（管理员代提交时的目标用户）。
+     */
+    private String ownerUsername;
+
     @TableField(exist = false)
     private OrderRecord order;
 }

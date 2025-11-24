@@ -9,11 +9,13 @@ import com.example.demo.order.dto.OrderFilterRequest;
 import com.example.demo.order.dto.OrderUpdateRequest;
 import com.example.demo.order.entity.OrderRecord;
 import java.util.List;
+import java.util.Map;
+
 import org.springframework.web.multipart.MultipartFile;
 
 public interface OrderService {
 
-    void importOrders(MultipartFile file, String operator);
+    Map<String, Object> importOrders(MultipartFile file, String operator);
 
     IPage<OrderRecord> query(OrderFilterRequest request);
 
@@ -26,6 +28,8 @@ public interface OrderService {
     OrderRecord update(Long id, OrderUpdateRequest request);
 
     List<OrderRecord> findByTracking(List<String> trackingNumbers);
+
+    List<OrderRecord> search(List<String> keywords);
 
     List<OrderCategoryStats> listCategoryStats(OrderFilterRequest request);
 

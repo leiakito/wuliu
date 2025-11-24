@@ -1,11 +1,13 @@
-import { defineStore } from 'pinia';
-import { computed, ref } from 'vue';
-import { getProfile } from '@/api/auth';
-import type { UserProfile } from '@/types/models';
+import { defineStore } from 'pinia'; //全局状态仓库
+import { computed, ref } from 'vue';//响应式变量 定义计算属性
+import { getProfile } from '@/api/auth'; //获取当前登录的个人信息
+import type { UserProfile } from '@/types/models'; //引入后端返回的用户信息结构 
 import { TOKEN_STORAGE_KEY, USER_STORAGE_KEY } from '@/constants/storage';
 
+//加载用户信息
 function loadUser(): UserProfile | null {
   try {
+    //读取本地缓存的用户信息字符串
     const cached = localStorage.getItem(USER_STORAGE_KEY);
     return cached ? (JSON.parse(cached) as UserProfile) : null;
   } catch (error) {

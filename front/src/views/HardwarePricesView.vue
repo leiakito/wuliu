@@ -3,9 +3,11 @@
     <div class="page-header">
       <div>
         <h2>硬件价格</h2>
-        <p class="sub">按日期记录 CPU / 主板 / GPU 等硬件价格</p>
+        <p class="sub">只记录型号、价格与录入人，支持上传 Excel 批量导入</p>
       </div>
       <div class="actions" v-if="isAdmin">
+        <input ref="fileInput" type="file" accept=".xls,.xlsx" hidden @change="handleFileChange" />
+        <el-button @click="openBatchDialog">导入Excel</el-button>
         <el-button type="primary" @click="openDialog()">新增价格</el-button>
       </div>
     </div>
@@ -27,16 +29,15 @@
           <el-button type="primary" @click="loadPrices">查询</el-button>
           <el-button @click="resetFilters">最近 7 天</el-button>
         </el-form-item>
-        <el-form-item label="分类">
-          <el-select
-            v-model="filters.category"
-            placeholder="全部"
+        <el-form-item label="型号">
+          <el-input
+            v-model="filters.itemName"
+            placeholder="输入型号关键字"
             clearable
-            filterable
-            style="width: 160px"
-          >
-            <el-option v-for="option in categoryOptions" :key="option" :label="option" :value="option" />
-          </el-select>
+            style="width: 200px"
+            @keyup.enter="loadPrices"
+          />
+          <el-button style="margin-left: 8px" @click="clearItemName">清空</el-button>
         </el-form-item>
       </el-form>
     </el-card>
@@ -44,12 +45,13 @@
     <el-card class="table-card">
       <el-table :data="sortedPrices" v-loading="loading">
         <el-table-column prop="priceDate" label="日期" width="140" />
-        <el-table-column prop="itemName" label="硬件"> </el-table-column>
-        <el-table-column prop="category" label="分类" width="140" />
+        <el-table-column prop="itemName" label="型号"> </el-table-column>
         <el-table-column prop="price" label="价格" width="140">
           <template #default="{ row }">￥{{ formatPrice(row.price) }}</template>
         </el-table-column>
-        <el-table-column prop="remark" label="备注" />
+        <el-table-column prop="createdAt" label="创建时间" width="180">
+          <template #default="{ row }">{{ formatDateTime(row.createdAt) }}</template>
+        </el-table-column>
         <el-table-column prop="createdBy" label="录入人" width="140" />
         <el-table-column v-if="isAdmin" label="操作" width="160">
           <template #default="{ row }">
@@ -68,14 +70,8 @@
         <el-form-item label="硬件名称" prop="itemName">
           <el-input v-model="dialog.form.itemName" placeholder="如 CPU i9-14900K" />
         </el-form-item>
-        <el-form-item label="分类">
-          <el-input v-model="dialog.form.category" placeholder="如 CPU / 主板 / GPU" />
-        </el-form-item>
         <el-form-item label="价格" prop="price">
           <el-input-number v-model="dialog.form.price" :min="0" :step="50" controls-position="right" />
-        </el-form-item>
-        <el-form-item label="备注">
-          <el-input v-model="dialog.form.remark" type="textarea" :rows="3" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -83,24 +79,57 @@
         <el-button type="primary" :loading="dialog.loading" @click="submitForm">保存</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="batchDialog.visible" title="导入Excel" width="560px">
+      <p class="muted" style="margin-bottom: 12px">
+        上传 Excel：首列 <code>型号</code>，第二列 <code>价格</code>，日期使用下方选择的值。
+      </p>
+      <div class="batch-form file-line">
+        <el-date-picker
+          v-model="batchDialog.form.priceDate"
+          type="date"
+          value-format="YYYY-MM-DD"
+          placeholder="选择日期（默认为今日）"
+        />
+        <el-input v-model="batchDialog.fileName" placeholder="请选择 Excel 文件" readonly />
+        <el-button @click="triggerFileSelect">选择文件</el-button>
+      </div>
+      <template #footer>
+        <el-button @click="batchDialog.visible = false">取消</el-button>
+        <el-button type="primary" :loading="batchDialog.loading" @click="submitBatch">导入</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog
+      v-model="batchProgress.visible"
+      title="Excel 导入中"
+      width="360px"
+      :show-close="false"
+      align-center
+    >
+      <p class="muted" style="margin-bottom: 12px">正在导入数据，请稍候…</p>
+      <el-progress :percentage="batchProgress.percent" :stroke-width="12" status="success" />
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue';
+import { computed, reactive, ref, watch, onBeforeUnmount } from 'vue';
 import type { FormInstance, FormRules } from 'element-plus';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { fetchHardwarePrices, createHardwarePrice, updateHardwarePrice, deleteHardwarePrice } from '@/api/hardware';
+import { fetchHardwarePrices, createHardwarePrice, updateHardwarePrice, deleteHardwarePrice, importHardwarePrices } from '@/api/hardware';
 import type { HardwarePrice, HardwarePriceRequest } from '@/types/models';
 import { useAuthStore } from '@/store/auth';
 
 const auth = useAuthStore();
 const isAdmin = computed(() => auth.user?.role === 'ADMIN');
+const fileInput = ref<HTMLInputElement>();
 
 const filters = reactive({
   range: [] as string[],
-  category: ''
+  itemName: ''
 });
+const autoSearchSuspended = ref(false);
 
 const prices = ref<HardwarePrice[]>([]);
 const loading = ref(false);
@@ -109,8 +138,21 @@ const dialog = reactive({
   visible: false,
   loading: false,
   editingId: 0,
-  form: { priceDate: '', itemName: '', category: '', price: 0, remark: '' } as HardwarePriceRequest
+  form: { priceDate: '', itemName: '', price: 0 } as HardwarePriceRequest
 });
+
+const batchDialog = reactive({
+  visible: false,
+  loading: false,
+  form: { priceDate: '' },
+  fileName: ''
+});
+const batchProgress = reactive({
+  visible: false,
+  percent: 0,
+  timer: null as number | null
+});
+const selectedFile = ref<File | null>(null);
 
 const formRef = ref<FormInstance>();
 
@@ -120,9 +162,6 @@ const rules: FormRules = {
   price: [{ required: true, message: '请输入价格', trigger: 'change' }]
 };
 
-const categoryOptions = computed(() =>
-  Array.from(new Set(prices.value.map(price => price.category).filter((c): c is string => !!c)))
-);
 const sortedPrices = computed(() => prices.value);
 
 const defaultRange = () => {
@@ -137,13 +176,13 @@ const formatDate = (date: Date) => date.toISOString().slice(0, 10);
 const loadPrices = async () => {
   loading.value = true;
   try {
-    const params: { startDate?: string; endDate?: string; category?: string } = {};
-    if (filters.range.length === 2) {
+    const params: { startDate?: string; endDate?: string; itemName?: string } = {};
+    if (Array.isArray(filters.range) && filters.range.length === 2) {
       params.startDate = filters.range[0];
       params.endDate = filters.range[1];
     }
-    if (filters.category) {
-      params.category = filters.category;
+    if (filters.itemName) {
+      params.itemName = filters.itemName;
     }
     prices.value = await fetchHardwarePrices(params);
   } finally {
@@ -152,9 +191,15 @@ const loadPrices = async () => {
 };
 
 const resetFilters = () => {
+  autoSearchSuspended.value = true;
   filters.range = defaultRange();
-  filters.category = '';
+  filters.itemName = '';
+  autoSearchSuspended.value = false;
   loadPrices();
+};
+
+const clearItemName = () => {
+  filters.itemName = '';
 };
 
 const openDialog = (price?: HardwarePrice) => {
@@ -163,21 +208,41 @@ const openDialog = (price?: HardwarePrice) => {
     Object.assign(dialog.form, {
       priceDate: price.priceDate,
       itemName: price.itemName,
-      category: price.category ?? '',
-      price: price.price,
-      remark: price.remark ?? ''
+      price: price.price
     });
   } else {
     dialog.editingId = 0;
     Object.assign(dialog.form, {
-      priceDate: filters.range[1] || formatDate(new Date()),
+      priceDate: (Array.isArray(filters.range) && filters.range[1]) ? filters.range[1] : formatDate(new Date()),
       itemName: '',
-      category: filters.category || '',
-      price: 0,
-      remark: ''
+      price: 0
     });
   }
   dialog.visible = true;
+};
+
+const openBatchDialog = () => {
+  selectedFile.value = null;
+  batchDialog.fileName = '';
+  batchDialog.form.priceDate = (Array.isArray(filters.range) && filters.range[1])
+    ? filters.range[1]
+    : formatDate(new Date());
+  if (fileInput.value) {
+    fileInput.value.value = '';
+  }
+  batchDialog.visible = true;
+};
+
+const triggerFileSelect = () => {
+  fileInput.value?.click();
+};
+
+const handleFileChange = (event: Event) => {
+  const target = event.target as HTMLInputElement;
+  const file = target.files?.[0];
+  if (!file) return;
+  selectedFile.value = file;
+  batchDialog.fileName = file.name;
 };
 
 const submitForm = async () => {
@@ -208,8 +273,79 @@ const handleDelete = async (row: HardwarePrice) => {
 };
 
 const formatPrice = (value?: number) => (value ?? 0).toFixed(2);
+const formatDateTime = (value?: string) => {
+  if (!value) return '-';
+  const normalized = value.replace('T', ' ').replace('Z', '');
+  return normalized.slice(0, 19);
+};
+
+const startBatchProgress = () => {
+  batchProgress.visible = true;
+  batchProgress.percent = 10;
+  if (batchProgress.timer) {
+    clearInterval(batchProgress.timer);
+  }
+  batchProgress.timer = window.setInterval(() => {
+    if (batchProgress.percent < 90) {
+      batchProgress.percent += 10;
+    }
+  }, 300);
+};
+
+const finishBatchProgress = () => {
+  if (batchProgress.timer) {
+    clearInterval(batchProgress.timer);
+    batchProgress.timer = null;
+  }
+  batchProgress.percent = 100;
+  setTimeout(() => {
+    batchProgress.visible = false;
+    batchProgress.percent = 0;
+  }, 400);
+};
+
+const submitBatch = async () => {
+  if (!batchDialog.form.priceDate) {
+    ElMessage.warning('请先选择日期');
+    return;
+  }
+  if (!selectedFile.value) {
+    ElMessage.warning('请先选择 Excel 文件');
+    return;
+  }
+  startBatchProgress();
+  batchDialog.loading = true;
+  try {
+    await importHardwarePrices(selectedFile.value, batchDialog.form.priceDate);
+    ElMessage.success('导入成功');
+    batchDialog.visible = false;
+    selectedFile.value = null;
+    batchDialog.fileName = '';
+    if (fileInput.value) {
+      fileInput.value.value = '';
+    }
+    loadPrices();
+  } finally {
+    batchDialog.loading = false;
+    finishBatchProgress();
+  }
+};
+
+const triggerAutoSearch = () => {
+  if (autoSearchSuspended.value) return;
+  loadPrices();
+};
+
+watch(() => filters.range, triggerAutoSearch, { deep: true });
+watch(() => filters.itemName, triggerAutoSearch);
 
 resetFilters();
+
+onBeforeUnmount(() => {
+  if (batchProgress.timer) {
+    clearInterval(batchProgress.timer);
+  }
+});
 </script>
 
 <style scoped>
@@ -220,5 +356,22 @@ resetFilters();
 
 .table-card {
   margin-top: 16px;
+}
+
+.batch-form {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 12px;
+  align-items: center;
+}
+
+.batch-form .el-input,
+.batch-form .el-input-number,
+.batch-form .el-date-picker {
+  flex: 1;
+}
+
+.batch-form.file-line .el-button {
+  flex: 0 0 110px;
 }
 </style>

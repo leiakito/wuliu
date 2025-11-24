@@ -9,12 +9,16 @@ import com.example.demo.order.entity.OrderRecord;
 import com.example.demo.order.mapper.OrderRecordMapper;
 import com.example.demo.order.service.OrderService;
 import com.example.demo.settlement.service.SettlementService;
+import com.example.demo.submission.dto.UserSubmissionBatchRequest;
 import com.example.demo.submission.dto.UserSubmissionCreateRequest;
 import com.example.demo.submission.dto.UserSubmissionQueryRequest;
 import com.example.demo.submission.entity.UserSubmission;
 import com.example.demo.submission.mapper.UserSubmissionMapper;
+import com.example.demo.submission.service.UserSubmissionLogService;
 import com.example.demo.submission.service.UserSubmissionService;
 import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -34,24 +38,38 @@ public class UserSubmissionServiceImpl implements UserSubmissionService {
     private final OrderService orderService;
     private final SettlementService settlementService;
     private final OrderRecordMapper orderRecordMapper;
+    private final UserSubmissionLogService userSubmissionLogService;
 
     @Override
     @Transactional
-    public UserSubmission create(UserSubmissionCreateRequest request, String username) {
-        if (!StringUtils.hasText(request.getTrackingNumber())) {
-            throw new BusinessException(ErrorCode.BAD_REQUEST, "单号不能为空");
-        }
-        String trackingNumber = request.getTrackingNumber().trim();
-        ensureNotSubmitted(trackingNumber);
-        UserSubmission submission = new UserSubmission();
-        submission.setUsername(username);
-        submission.setTrackingNumber(trackingNumber);
-        submission.setStatus(DEFAULT_STATUS);
-        submission.setSubmissionDate(LocalDate.now());
-        setAmountFromOrder(submission);
-        userSubmissionMapper.insert(submission);
-        syncSettlement(trackingNumber);
+    public UserSubmission create(UserSubmissionCreateRequest request, String operator, String ownerUsername) {
+        String submitter = normalizeUsername(operator);
+        String owner = normalizeUsername(ownerUsername);
+        String rawContent = request.getTrackingNumber();
+        String trackingNumber = normalizeTracking(rawContent);
+        UserSubmission submission = createSingleSubmission(trackingNumber, submitter, owner);
+        userSubmissionLogService.record(submitter, rawContent);
         return submission;
+    }
+
+    @Override
+    @Transactional
+    public List<UserSubmission> batchCreate(UserSubmissionBatchRequest request, String operator, String ownerUsername) {
+        String submitter = normalizeUsername(operator);
+        String owner = normalizeUsername(ownerUsername);
+        LinkedHashSet<String> sanitized = request.getTrackingNumbers().stream()
+            .map(this::normalizeTracking)
+            .filter(StringUtils::hasText)
+            .collect(Collectors.toCollection(LinkedHashSet::new));
+        if (sanitized.isEmpty()) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "请至少输入一个有效单号");
+        }
+        userSubmissionLogService.record(submitter, request.getRawContent());
+        List<UserSubmission> submissions = new ArrayList<>();
+        for (String trackingNumber : sanitized) {
+            submissions.add(createSingleSubmission(trackingNumber, submitter, owner));
+        }
+        return submissions;
     }
 
     @Override
@@ -70,9 +88,9 @@ public class UserSubmissionServiceImpl implements UserSubmissionService {
         Page<UserSubmission> page = Page.of(current, size);
         LambdaQueryWrapper<UserSubmission> wrapper = new LambdaQueryWrapper<>();
         if (forcedUsername != null) {
-            wrapper.eq(UserSubmission::getUsername, forcedUsername);
+            wrapper.eq(UserSubmission::getOwnerUsername, forcedUsername);
         } else if (allowUsernameFilter && StringUtils.hasText(request.getUsername())) {
-            wrapper.eq(UserSubmission::getUsername, request.getUsername().trim());
+            wrapper.eq(UserSubmission::getOwnerUsername, request.getUsername().trim());
         }
         if (StringUtils.hasText(request.getStatus())) {
             wrapper.eq(UserSubmission::getStatus, request.getStatus().trim());
@@ -148,5 +166,43 @@ public class UserSubmissionServiceImpl implements UserSubmissionService {
         if (userSubmissionMapper.selectCount(exists) > 0) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "该单号已被提交，请勿重复提交");
         }
+    }
+
+    private String normalizeTracking(String input) {
+        if (!StringUtils.hasText(input)) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "单号不能为空");
+        }
+        return input.trim();
+    }
+
+    private UserSubmission createSingleSubmission(String trackingNumber, String submitter, String ownerUsername) {
+        if (!StringUtils.hasText(trackingNumber)) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "单号不能为空");
+        }
+        if (!StringUtils.hasText(submitter)) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "提交人不能为空");
+        }
+        if (!StringUtils.hasText(ownerUsername)) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "提交人不能为空");
+        }
+        String normalized = trackingNumber.trim();
+        ensureNotSubmitted(normalized);
+        UserSubmission submission = new UserSubmission();
+        submission.setUsername(submitter.trim());
+        submission.setOwnerUsername(ownerUsername.trim());
+        submission.setTrackingNumber(normalized);
+        submission.setStatus(DEFAULT_STATUS);
+        submission.setSubmissionDate(LocalDate.now());
+        setAmountFromOrder(submission);
+        userSubmissionMapper.insert(submission);
+        syncSettlement(normalized);
+        return submission;
+    }
+
+    private String normalizeUsername(String username) {
+        if (!StringUtils.hasText(username)) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "提交人不能为空");
+        }
+        return username.trim();
     }
 }

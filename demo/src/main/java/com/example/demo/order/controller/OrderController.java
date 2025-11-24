@@ -21,6 +21,8 @@ import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import java.util.List;
+import java.util.Map;
+
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
@@ -53,11 +55,11 @@ public class OrderController {
     @SaCheckRole("ADMIN")
     @LogOperation("批量导入物流单号")
     @Operation(summary = "批量导入", description = "上传 Excel 以批量导入物流单号")
-    public ApiResponse<Void> importExcel(
+    public ApiResponse<Map<String, Object>> importExcel(
         @Parameter(description = "包含订单明细的 Excel 文件", required = true)
         @RequestParam("file") MultipartFile file) {
-        orderService.importOrders(file, StpUtil.getLoginIdAsString());
-        return ApiResponse.ok();
+        Map<String, Object> report = orderService.importOrders(file, StpUtil.getLoginIdAsString());
+        return ApiResponse.ok(report);
     }
 
     @PostMapping("/fetch")
@@ -70,9 +72,9 @@ public class OrderController {
 
     @PostMapping("/search")
     @SaCheckLogin
-    @Operation(summary = "按单号查询状态", description = "用户通过单号查询是否已录入或结账")
+    @Operation(summary = "按SN和单号查询状态", description = "用户通过单号SN查询是否已录入或结账")
     public ApiResponse<List<OrderRecord>> search(@Valid @RequestBody OrderSearchRequest request) {
-        return ApiResponse.ok(orderService.findByTracking(request.getTrackingNumbers()));
+        return ApiResponse.ok(orderService.search(request.getTrackingNumbers()));
     }
 
     @PatchMapping("/{id}/status")

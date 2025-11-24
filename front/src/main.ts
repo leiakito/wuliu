@@ -16,3 +16,5 @@ app.use(router);
 app.use(ElementPlus, { locale: zhCn });
 
 app.mount('#app');
+
+//入口和初始化脚本 注册 Pinia与路由 和启用Element Plus中文包

@@ -13,8 +13,6 @@ public class HardwarePriceRequest {
     private LocalDate priceDate;
     @NotBlank
     private String itemName;
-    private String category;
     @NotNull
     private BigDecimal price;
-    private String remark;
 }

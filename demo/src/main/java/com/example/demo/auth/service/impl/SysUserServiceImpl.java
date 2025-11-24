@@ -17,7 +17,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
-
+//实现类具体 自动注入
 @Service
 @RequiredArgsConstructor ////生成包含所有final字段的构造函数
 public class SysUserServiceImpl implements SysUserService {
@@ -104,6 +104,7 @@ public class SysUserServiceImpl implements SysUserService {
         return sysUserMapper.selectList(null);
     }
 
+    //SELECT * FROM sys_user WHERE username = #{username} LIMIT 1
     @Override
     public SysUser findByUsername(String username) {
         return sysUserMapper.selectOne(new LambdaQueryWrapper<SysUser>()

@@ -8,6 +8,7 @@ import com.baomidou.mybatisplus.annotation.TableName;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.List;
 import lombok.Data;
 
 @Data
@@ -27,6 +28,8 @@ public class SettlementRecord {
     private String settleBatch;
     private LocalDate payableAt;
     private String remark;
+    private String ownerUsername;
+    private LocalDateTime orderTime;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
     @TableLogic
@@ -39,4 +42,13 @@ public class SettlementRecord {
 
     @TableField(exist = false)
     private BigDecimal orderAmount;
+
+    @TableField(exist = false)
+    private String orderCreatedBy;
+
+    @TableField(exist = false)
+    private List<String> submissionUsers;
+
+    @TableField(exist = false)
+    private String orderSn;
 }

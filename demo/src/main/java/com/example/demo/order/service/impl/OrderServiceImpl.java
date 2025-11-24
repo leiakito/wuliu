@@ -24,10 +24,7 @@ import java.io.IOException;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
+import java.util.*;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.cache.annotation.CacheEvict;
@@ -47,9 +44,10 @@ public class OrderServiceImpl implements OrderService {
 
     @Override
     @Transactional
-    public void importOrders(MultipartFile file, String operator) {
+    public Map<String, Object> importOrders(MultipartFile file, String operator) {
         try {
             List<OrderRecord> records = ExcelHelper.readOrders(file.getInputStream(), operator);
+            Map<String, List<String>> duplicateSnInFile = findDuplicateSnInList(records);
             List<OrderRecord> needSettlement = new ArrayList<>();
             for (OrderRecord record : records) {
                 record.setImported(Boolean.TRUE);
@@ -64,6 +62,12 @@ public class OrderServiceImpl implements OrderService {
             if (!needSettlement.isEmpty()) {
                 settlementService.createPending(needSettlement, true);
             }
+            Map<String, Object> report = new HashMap<>();
+            if (!duplicateSnInFile.isEmpty()) {
+                report.put("duplicateSn", duplicateSnInFile.keySet());
+                report.put("duplicateSnDetail", duplicateSnInFile);
+            }
+            return report;
         } catch (IOException e) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "Excel 解析失败");
         }
@@ -73,6 +77,7 @@ public class OrderServiceImpl implements OrderService {
     public IPage<OrderRecord> query(OrderFilterRequest request) {
         Page<OrderRecord> page = Page.of(request.getPage(), request.getSize());
         LambdaQueryWrapper<OrderRecord> wrapper = new LambdaQueryWrapper<>();
+
         if (request.getStartDate() != null) {
             wrapper.ge(OrderRecord::getOrderDate, request.getStartDate());
         }
@@ -87,10 +92,26 @@ public class OrderServiceImpl implements OrderService {
         }
         if (request.getKeyword() != null && !request.getKeyword().isBlank()) {
             wrapper.and(w -> w.like(OrderRecord::getTrackingNumber, request.getKeyword())
+                .or().like(OrderRecord::getSn, request.getKeyword())
                 .or().like(OrderRecord::getModel, request.getKeyword()));
         }
         wrapper.orderByDesc(OrderRecord::getOrderDate);
         return orderRecordMapper.selectPage(page, wrapper);
+    }
+
+    private Map<String, List<String>> findDuplicateSnInList(List<OrderRecord> records) {
+        Map<String, List<String>> map = new HashMap<>();
+        records.stream()
+            .filter(r -> StringUtils.hasText(r.getSn()))
+            .forEach(r -> {
+                String sn = r.getSn().trim();
+                map.computeIfAbsent(sn, key -> new ArrayList<>()).add(
+                    StringUtils.hasText(r.getTrackingNumber()) ? r.getTrackingNumber().trim() : "(无单号)"
+                );
+            });
+        return map.entrySet().stream()
+            .filter(e -> e.getValue().size() > 1)
+            .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
     }
 
     @Override
@@ -175,6 +196,31 @@ public class OrderServiceImpl implements OrderService {
             return List.of();
         }
         wrapper.in(OrderRecord::getTrackingNumber, unique);
+        return orderRecordMapper.selectList(wrapper);
+    }
+
+    @Override
+    public List<OrderRecord> search(List<String> keywords) {
+        if (CollectionUtils.isEmpty(keywords)) {
+            return List.of();
+        }
+        //// 去掉 null / "" / "   "  去空格 再次过滤空字符串 去重
+        var unique = keywords.stream()
+            .filter(StringUtils::hasText)
+            .map(String::trim)
+            .filter(str -> !str.isEmpty())
+            .collect(Collectors.toSet());
+        if (unique.isEmpty()) {
+            return List.of();
+        }
+        LambdaQueryWrapper<OrderRecord> wrapper = new LambdaQueryWrapper<>();
+        wrapper.and(w -> w.in(OrderRecord::getTrackingNumber, unique)
+            .or()
+            .in(OrderRecord::getSn, unique));
+        //等价 AND (
+        //  tracking_number IN (?,?,?,?)
+        //  OR sn IN (?,?,?,?)
+        //)
         return orderRecordMapper.selectList(wrapper);
     }
 
@@ -267,6 +313,7 @@ public class OrderServiceImpl implements OrderService {
         }
         if (StringUtils.hasText(request.getKeyword())) {
             wrapper.and(w -> w.like("tracking_number", request.getKeyword())
+                .or().like("sn", request.getKeyword())
                 .or().like("model", request.getKeyword()));
         }
         wrapper.select("COALESCE(category, '未分配') AS category_name", "COUNT(*) AS total_count");

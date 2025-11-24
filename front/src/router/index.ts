@@ -2,17 +2,19 @@ import { createRouter, createWebHistory, RouteRecordRaw } from 'vue-router';
 import { useAuthStore } from '@/store/auth';
 import MainLayout from '@/components/MainLayout.vue';
 
+//路由系统
 const routes: RouteRecordRaw[] = [
   {
+    //不需要登陆,访问/login 链接到@/views/LoginView.vue
     path: '/login',
     name: 'login',
     component: () => import('@/views/LoginView.vue')
   },
-  {
+  {//需要登陆才能访问 
     path: '/',
     component: MainLayout,
     meta: { requiresAuth: true },
-    children: [
+    children: [ //children 子路由解析 默认定向到dashboard 
       { path: '', redirect: '/dashboard' },
       {
         path: 'dashboard',
@@ -22,15 +24,9 @@ const routes: RouteRecordRaw[] = [
       },
       {
         path: 'orders',
-        name: 'orders',
+        name: 'orders', //权限限制页面,只要roles 管理员才可以访问
         component: () => import('@/views/OrdersView.vue'),
         meta: { requiresAuth: true, title: '物流单号', roles: ['ADMIN'] }
-      },
-      {
-        path: 'announcements',
-        name: 'announcements',
-        component: () => import('@/views/AnnouncementsView.vue'),
-        meta: { requiresAuth: true, title: '系统公告' }
       },
       {
         path: 'user-submissions',
@@ -45,10 +41,22 @@ const routes: RouteRecordRaw[] = [
         meta: { requiresAuth: true, title: '硬件价格' }
       },
       {
+        path: 'hardware-analytics',
+        name: 'hardware-analytics',
+        component: () => import('@/views/HardwareAnalyticsView.vue'),
+        meta: { requiresAuth: true, title: '价格分析' }
+      },
+      {
         path: 'settlements',
         name: 'settlements',
         component: () => import('@/views/SettlementsView.vue'),
         meta: { requiresAuth: true, title: '结账管理', roles: ['ADMIN'] }
+      },
+      {
+        path: 'submission-logs',
+        name: 'submission-logs',
+        component: () => import('@/views/SubmissionLogsView.vue'),
+        meta: { requiresAuth: true, title: '提交记录', roles: ['ADMIN'] }
       },
       {
         path: 'users',
@@ -65,27 +73,32 @@ const routes: RouteRecordRaw[] = [
     ]
   },
   {
-    path: '/:pathMatch(.*)*',
+    path: '/:pathMatch(.*)*',//兜底路由,访问地址不存在,重定向到/dashborad
     redirect: '/dashboard'
   }
 ];
-
+//创建Router实例, 控制跳转 监听变化,使用导航卫士💂
 const router = createRouter({
   history: createWebHistory(),
   routes
 });
-
+//鉴权、避免已登录用户再进登录页、按角色限制访问
+//全局路由守卫（核心权限控制）
+//每次路由跳转前都会执行
 router.beforeEach((to, _from, next) => {
-  const auth = useAuthStore();
-  const requiresAuth = to.matched.some(record => record.meta.requiresAuth);
+  const auth = useAuthStore();//获取登陆状态 是否登陆 角色 token 
+  const requiresAuth = to.matched.some(record => record.meta.requiresAuth);//算是否需要登录：读取目标路由的 meta.requiresAuth
+  //未登录跳转登录页
   if (requiresAuth && !auth.isAuthenticated) {
     next({ name: 'login', query: { redirect: to.fullPath } });
     return;
   }
+  //已登录访问/login不允许/重定向到dashboard
   if (to.name === 'login' && auth.isAuthenticated) {
     next({ path: '/dashboard' });
     return;
   }
+  //按角色权限控制访问 
   const roles = to.meta.roles as string[] | undefined;
   if (roles && !roles.includes(auth.user?.role ?? '')) {
     next({ path: '/dashboard' });

@@ -17,9 +17,7 @@ public class HardwarePrice {
     private Long id;
     private LocalDate priceDate;
     private String itemName;
-    private String category;
     private BigDecimal price;
-    private String remark;
     private String createdBy;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;

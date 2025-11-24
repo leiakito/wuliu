@@ -7,5 +7,5 @@ import lombok.Data;
 public class HardwarePriceQuery {
     private LocalDate startDate;
     private LocalDate endDate;
-    private String category;
+    private String itemName;
 }

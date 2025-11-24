@@ -15,14 +15,20 @@ export interface BatchFetchPayload {
 export const fetchOrders = (params: OrderFilterRequest) =>
   apiClient.get<PageResponse<OrderRecord>>('/orders', { params });
 
+export const fetchOrdersWithConfig = (
+  params: OrderFilterRequest,
+  config: Record<string, any> = {}
+) => apiClient.get<PageResponse<OrderRecord>>('/orders', { params, ...config });
+
 export const createOrder = (payload: OrderCreateRequest) =>
   apiClient.post<OrderRecord>('/orders', payload);
 
 export const importOrders = (file: File) => {
   const formData = new FormData();
   formData.append('file', file);
-  return apiClient.post<void>('/orders/import', formData, {
-    headers: { 'Content-Type': 'multipart/form-data' }
+  return apiClient.post<{ duplicateSn?: string[]; duplicateSnDetail?: Record<string, string[]> }>('/orders/import', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 300000
   });
 };
 
