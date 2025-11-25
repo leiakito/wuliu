@@ -8,6 +8,7 @@ import com.example.demo.settlement.dto.SettlementBatchPriceRequest;
 import com.example.demo.settlement.dto.SettlementBatchSnPriceRequest;
 import com.example.demo.settlement.dto.SettlementBatchSnPriceResponse;
 import com.example.demo.settlement.dto.SettlementConfirmRequest;
+import com.example.demo.settlement.dto.SettlementCursorRequest;
 import com.example.demo.settlement.dto.SettlementExportRequest;
 import com.example.demo.settlement.dto.SettlementFilterRequest;
 import com.example.demo.settlement.entity.SettlementRecord;
@@ -18,6 +19,8 @@ public interface SettlementService {
     List<SettlementRecord> createPending(List<OrderRecord> orders, boolean warnDouble);
 
     IPage<SettlementRecord> list(SettlementFilterRequest request);
+
+    IPage<SettlementRecord> listByCursor(SettlementCursorRequest request);
 
     void confirm(Long id, SettlementConfirmRequest request, String operator);
 

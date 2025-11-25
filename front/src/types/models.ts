@@ -133,11 +133,14 @@ export interface SettlementFilterRequest {
   ownerUsername?: string;
   model?: string;
   trackingNumber?: string;
+  orderSn?: string;
   keyword?: string;
   startDate?: string;
   endDate?: string;
   page?: number;
   size?: number;
+  sortProp?: string;
+  sortOrder?: 'ascending' | 'descending';
 }
 
 export interface SettlementConfirmRequest {

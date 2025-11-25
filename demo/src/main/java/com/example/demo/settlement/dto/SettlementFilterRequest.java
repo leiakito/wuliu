@@ -11,9 +11,12 @@ public class SettlementFilterRequest {
     private String ownerUsername;
     private String model;
     private String trackingNumber;
+    private String orderSn;
     private String keyword;
     private LocalDate startDate;
     private LocalDate endDate;
     private long page = 1;
     private long size = 20;
+    private String sortProp;
+    private String sortOrder;
 }

@@ -13,6 +13,7 @@ import com.example.demo.settlement.dto.SettlementBatchPriceRequest;
 import com.example.demo.settlement.dto.SettlementBatchSnPriceRequest;
 import com.example.demo.settlement.dto.SettlementBatchSnPriceResponse;
 import com.example.demo.settlement.dto.SettlementConfirmRequest;
+import com.example.demo.settlement.dto.SettlementCursorRequest;
 import com.example.demo.settlement.dto.SettlementExportRequest;
 import com.example.demo.settlement.dto.SettlementFilterRequest;
 import com.example.demo.settlement.entity.SettlementRecord;
@@ -49,6 +50,14 @@ public class SettlementController {
     @Operation(summary = "分页查询结算", description = "按状态、批次和时间段查询待结账/已结账记录")
     public ApiResponse<PageResponse<SettlementRecord>> page(SettlementFilterRequest request) {
         IPage<SettlementRecord> page = settlementService.list(request);
+        return ApiResponse.ok(PageResponse.from(page));
+    }
+
+    @GetMapping("/cursor")
+    @SaCheckLogin
+    @Operation(summary = "游标分页查询结算", description = "使用游标分页，性能不受页数影响，适合深度分页")
+    public ApiResponse<PageResponse<SettlementRecord>> pageByCursor(SettlementCursorRequest request) {
+        IPage<SettlementRecord> page = settlementService.listByCursor(request);
         return ApiResponse.ok(PageResponse.from(page));
     }
 

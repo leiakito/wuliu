@@ -357,6 +357,18 @@ public class OrderServiceImpl implements OrderService {
         if (incoming.getOrderTime() == null && incoming.getOrderDate() != null) {
             incoming.setOrderTime(incoming.getOrderDate().atStartOfDay());
         }
+
+        // 截断过长的字段，防止数据库错误
+        if (StringUtils.hasText(incoming.getModel()) && incoming.getModel().length() > 50) {
+            incoming.setModel(incoming.getModel().substring(0, 50));
+        }
+        if (StringUtils.hasText(incoming.getTrackingNumber()) && incoming.getTrackingNumber().length() > 64) {
+            incoming.setTrackingNumber(incoming.getTrackingNumber().substring(0, 64));
+        }
+        if (StringUtils.hasText(incoming.getRemark()) && incoming.getRemark().length() > 255) {
+            incoming.setRemark(incoming.getRemark().substring(0, 255));
+        }
+
         incoming.setImported(Boolean.TRUE);
         if (existed == null) {
             orderRecordMapper.insert(incoming);

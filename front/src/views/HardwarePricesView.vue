@@ -188,6 +188,7 @@ import { useAuthStore } from '@/store/auth';
 const auth = useAuthStore();
 const isAdmin = computed(() => auth.user?.role === 'ADMIN');
 const fileInput = ref<HTMLInputElement>();
+const FILTER_STORAGE_KEY = 'hardware-price-filters';
 
 const filters = reactive({
   range: [] as string[],
@@ -241,6 +242,35 @@ const defaultRange = () => {
 };
 
 const formatDate = (date: Date) => date.toISOString().slice(0, 10);
+
+const loadStoredFilters = () => {
+  try {
+    const raw = localStorage.getItem(FILTER_STORAGE_KEY);
+    if (!raw) return false;
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed.range) && parsed.range.length === 2) {
+      filters.range = parsed.range;
+    }
+    if (typeof parsed.itemName === 'string') {
+      filters.itemName = parsed.itemName;
+    }
+    return true;
+  } catch (error) {
+    console.warn('Failed to load hardware price filters', error);
+    return false;
+  }
+};
+
+const persistFilters = () => {
+  try {
+    localStorage.setItem(
+      FILTER_STORAGE_KEY,
+      JSON.stringify({ range: filters.range, itemName: filters.itemName })
+    );
+  } catch (error) {
+    console.warn('Failed to persist hardware price filters', error);
+  }
+};
 
 const loadPrices = async () => {
   loading.value = true;
@@ -444,10 +474,31 @@ const triggerAutoSearch = () => {
   loadPrices();
 };
 
-watch(() => filters.range, triggerAutoSearch, { deep: true });
-watch(() => filters.itemName, triggerAutoSearch);
+watch(
+  () => filters.range,
+  () => {
+    persistFilters();
+    triggerAutoSearch();
+  },
+  { deep: true }
+);
+watch(() => filters.itemName, () => {
+  persistFilters();
+  triggerAutoSearch();
+});
 
-resetFilters();
+const initFilters = () => {
+  autoSearchSuspended.value = true;
+  const restored = loadStoredFilters();
+  if (!restored) {
+    filters.range = defaultRange();
+    filters.itemName = '';
+  }
+  autoSearchSuspended.value = false;
+  loadPrices();
+};
+
+initFilters();
 </script>
 
 <style scoped>

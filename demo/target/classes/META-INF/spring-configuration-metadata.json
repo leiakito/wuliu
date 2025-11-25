@@ -9,13 +9,13 @@
       "name": "app.export",
       "type": "com.example.demo.config.AppProperties$Export",
       "sourceType": "com.example.demo.config.AppProperties",
-      "sourceMethod": "public com.example.demo.config.AppProperties.Export getExport() "
+      "sourceMethod": "getExport()"
     },
     {
       "name": "app.settlement",
       "type": "com.example.demo.config.AppProperties$Settlement",
       "sourceType": "com.example.demo.config.AppProperties",
-      "sourceMethod": "public com.example.demo.config.AppProperties.Settlement getSettlement() "
+      "sourceMethod": "getSettlement()"
     }
   ],
   "properties": [

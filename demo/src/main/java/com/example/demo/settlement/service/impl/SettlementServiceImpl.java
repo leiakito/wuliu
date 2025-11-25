@@ -21,6 +21,7 @@ import com.example.demo.settlement.dto.SettlementBatchPriceRequest;
 import com.example.demo.settlement.dto.SettlementBatchSnPriceRequest;
 import com.example.demo.settlement.dto.SettlementBatchSnPriceResponse;
 import com.example.demo.settlement.dto.SettlementConfirmRequest;
+import com.example.demo.settlement.dto.SettlementCursorRequest;
 import com.example.demo.settlement.dto.SettlementExportRequest;
 import com.example.demo.settlement.dto.SettlementFilterRequest;
 import com.example.demo.settlement.entity.SettlementRecord;
@@ -33,11 +34,13 @@ import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class SettlementServiceImpl implements SettlementService {
@@ -137,27 +140,155 @@ public class SettlementServiceImpl implements SettlementService {
     }
 
     @Override
+    public IPage<SettlementRecord> listByCursor(SettlementCursorRequest request) {
+        LambdaQueryWrapper<SettlementRecord> wrapper = buildQueryWrapper(request);
+
+        // 游标分页：基于 ID 的范围查询，性能不受页数影响
+        if (request.getLastId() != null && request.getLastId() > 0) {
+            // 根据排序方向决定使用 lt 还是 gt
+            boolean isAsc = "ascending".equalsIgnoreCase(request.getSortOrder());
+            if (isAsc) {
+                wrapper.gt(SettlementRecord::getId, request.getLastId());
+            } else {
+                wrapper.lt(SettlementRecord::getId, request.getLastId());
+            }
+        }
+
+        // 应用排序
+        applySorting(wrapper, request.getSortProp(), request.getSortOrder());
+
+        // 限制查询数量
+        wrapper.last("LIMIT " + request.getSize());
+
+        log.info("游标分页查询 - lastId: {}, size: {}", request.getLastId(), request.getSize());
+
+        List<SettlementRecord> records = settlementRecordMapper.selectList(wrapper);
+
+        // 查询总数（仅在首次查询时）
+        Long total = 0L;
+        if (request.getLastId() == null) {
+            LambdaQueryWrapper<SettlementRecord> countWrapper = buildQueryWrapper(request);
+            total = settlementRecordMapper.selectCount(countWrapper);
+        }
+
+        log.info("游标分页结果: 返回{}条记录, 总数{}", records.size(), total);
+
+        attachOrderInfo(records);
+
+        // 构造分页结果
+        Page<SettlementRecord> page = new Page<>();
+        page.setRecords(records);
+        page.setTotal(total);
+        page.setSize(request.getSize());
+        return page;
+    }
+
+    @Override
     public IPage<SettlementRecord> list(SettlementFilterRequest request) {
+        LambdaQueryWrapper<SettlementRecord> wrapper = buildQueryWrapper(request);
+        applySorting(wrapper, request.getSortProp(), request.getSortOrder());
+
+        log.info("执行查询前的wrapper条件数: {}", wrapper.getExpression().getNormal().size());
+
+        Page<SettlementRecord> page = Page.of(request.getPage(), request.getSize());
+        IPage<SettlementRecord> result = settlementRecordMapper.selectPage(page, wrapper);
+
+        log.info("查询结果: 返回{}条记录, 总数{}", result.getRecords().size(), result.getTotal());
+
+        attachOrderInfo(result.getRecords());
+        return result;
+    }
+
+    private LambdaQueryWrapper<SettlementRecord> buildQueryWrapper(Object request) {
         LambdaQueryWrapper<SettlementRecord> wrapper = new LambdaQueryWrapper<>();
-        if (request.getStatus() != null && !request.getStatus().isBlank()) {
-            wrapper.eq(SettlementRecord::getStatus, request.getStatus());
+
+        // 提取共同的筛选条件
+        String status = null;
+        String batch = null;
+        String model = null;
+        String trackingNumber = null;
+        String orderSn = null;
+        String keyword = null;
+        LocalDate startDate = null;
+        LocalDate endDate = null;
+        String ownerUsername = null;
+
+        if (request instanceof SettlementFilterRequest) {
+            SettlementFilterRequest r = (SettlementFilterRequest) request;
+            status = r.getStatus();
+            batch = r.getBatch();
+            model = r.getModel();
+            trackingNumber = r.getTrackingNumber();
+            orderSn = r.getOrderSn();
+            keyword = r.getKeyword();
+            startDate = r.getStartDate();
+            endDate = r.getEndDate();
+            ownerUsername = r.getOwnerUsername();
+        } else if (request instanceof SettlementCursorRequest) {
+            SettlementCursorRequest r = (SettlementCursorRequest) request;
+            status = r.getStatus();
+            batch = r.getBatch();
+            model = r.getModel();
+            trackingNumber = r.getTrackingNumber();
+            orderSn = r.getOrderSn();
+            keyword = r.getKeyword();
+            startDate = r.getStartDate();
+            endDate = r.getEndDate();
+            ownerUsername = r.getOwnerUsername();
         }
-        if (request.getBatch() != null && !request.getBatch().isBlank()) {
-            wrapper.eq(SettlementRecord::getSettleBatch, request.getBatch());
+
+        // 应用筛选条件
+        if (status != null && !status.isBlank()) {
+            wrapper.eq(SettlementRecord::getStatus, status);
         }
-        if (StringUtils.hasText(request.getModel())) {
-            wrapper.like(SettlementRecord::getModel, request.getModel().trim());
+        if (batch != null && !batch.isBlank()) {
+            wrapper.eq(SettlementRecord::getSettleBatch, batch);
         }
-        if (StringUtils.hasText(request.getTrackingNumber())) {
-            wrapper.like(SettlementRecord::getTrackingNumber, request.getTrackingNumber().trim());
+        if (StringUtils.hasText(model)) {
+            wrapper.like(SettlementRecord::getModel, model.trim());
         }
-        if (StringUtils.hasText(request.getKeyword())) {
-            String keyword = request.getKeyword().trim();
+        if (StringUtils.hasText(trackingNumber)) {
+            wrapper.like(SettlementRecord::getTrackingNumber, trackingNumber.trim());
+        }
+        if (StringUtils.hasText(orderSn)) {
+            // orderSn 是关联字段，需要先查询 OrderRecord 找到匹配的 orderId
+            String sn = orderSn.trim().toUpperCase();
+            log.info("查询SN: {}", sn);
+            LambdaQueryWrapper<OrderRecord> orderWrapper = new LambdaQueryWrapper<>();
+            // 使用精确匹配，忽略大小写
+            orderWrapper.apply("UPPER(sn) = {0}", sn);
+            List<OrderRecord> matchedOrders = orderRecordMapper.selectList(orderWrapper);
+            log.info("找到匹配的订单数量: {}", matchedOrders.size());
+            if (CollectionUtils.isEmpty(matchedOrders)) {
+                // 没有匹配的订单，返回空结果的 wrapper
+                log.warn("未找到SN对应的订单: {}", sn);
+                wrapper.eq(SettlementRecord::getId, -1L); // 强制返回空结果
+                return wrapper;
+            }
+
+            // 关键修复：使用 orderId 精确匹配，而不是 trackingNumber
+            Set<Long> matchedOrderIds = matchedOrders.stream()
+                .map(OrderRecord::getId)
+                .filter(id -> id != null && id > 0)
+                .collect(Collectors.toSet());
+
+            log.info("匹配的订单ID: {}", matchedOrderIds);
+
+            if (matchedOrderIds.isEmpty()) {
+                log.warn("找到订单但没有有效的订单ID");
+                wrapper.eq(SettlementRecord::getId, -1L); // 强制返回空结果
+                return wrapper;
+            }
+
+            wrapper.in(SettlementRecord::getOrderId, matchedOrderIds);
+        }
+        if (StringUtils.hasText(keyword)) {
+            String kw = keyword.trim();
             Set<String> matchTracking = new HashSet<>();
             LambdaQueryWrapper<OrderRecord> orderWrapper = new LambdaQueryWrapper<>();
-            orderWrapper.like(OrderRecord::getTrackingNumber, keyword)
-                .or().like(OrderRecord::getModel, keyword)
-                .or().like(OrderRecord::getSn, keyword);
+            orderWrapper.like(OrderRecord::getTrackingNumber, kw)
+                .or().like(OrderRecord::getModel, kw)
+                .or().like(OrderRecord::getSn, kw);
             List<OrderRecord> matchedOrders = orderRecordMapper.selectList(orderWrapper);
             if (!CollectionUtils.isEmpty(matchedOrders)) {
                 matchTracking.addAll(matchedOrders.stream()
@@ -166,28 +297,52 @@ public class SettlementServiceImpl implements SettlementService {
                     .collect(Collectors.toSet()));
             }
             wrapper.and(w -> {
-                w.like(SettlementRecord::getTrackingNumber, keyword)
-                    .or().like(SettlementRecord::getModel, keyword);
+                w.like(SettlementRecord::getTrackingNumber, kw)
+                    .or().like(SettlementRecord::getModel, kw);
                 if (!matchTracking.isEmpty()) {
                     w.or().in(SettlementRecord::getTrackingNumber, matchTracking);
                 }
             });
         }
-        if (request.getStartDate() != null) {
-            wrapper.ge(SettlementRecord::getPayableAt, request.getStartDate());
+        if (startDate != null) {
+            wrapper.ge(SettlementRecord::getPayableAt, startDate);
         }
-        if (request.getEndDate() != null) {
-            wrapper.le(SettlementRecord::getPayableAt, request.getEndDate());
+        if (endDate != null) {
+            wrapper.le(SettlementRecord::getPayableAt, endDate);
         }
-        if (StringUtils.hasText(request.getOwnerUsername())) {
-            wrapper.eq(SettlementRecord::getOwnerUsername, request.getOwnerUsername().trim());
+        if (StringUtils.hasText(ownerUsername)) {
+            wrapper.eq(SettlementRecord::getOwnerUsername, ownerUsername.trim());
         }
-        wrapper.orderByDesc(SettlementRecord::getCreatedAt);
-        Page<SettlementRecord> page = Page.of(request.getPage(), request.getSize());
-        IPage<SettlementRecord> result = settlementRecordMapper.selectPage(page, wrapper);
-        attachOrderInfo(result.getRecords());
-        return result;
+
+        return wrapper;
     }
+
+    private void applySorting(LambdaQueryWrapper<SettlementRecord> wrapper, String sortProp, String sortOrder) {
+        // 支持动态排序
+        if (StringUtils.hasText(sortProp)) {
+            boolean isAsc = "ascending".equalsIgnoreCase(sortOrder);
+            switch (sortProp) {
+                case "orderTime":
+                    wrapper.orderBy(true, isAsc, SettlementRecord::getOrderTime);
+                    break;
+                case "amount":
+                    wrapper.orderBy(true, isAsc, SettlementRecord::getAmount);
+                    break;
+                case "trackingNumber":
+                    wrapper.orderBy(true, isAsc, SettlementRecord::getTrackingNumber);
+                    break;
+                case "status":
+                    wrapper.orderBy(true, isAsc, SettlementRecord::getStatus);
+                    break;
+                default:
+                    wrapper.orderByDesc(SettlementRecord::getCreatedAt);
+                    break;
+            }
+        } else {
+            wrapper.orderByDesc(SettlementRecord::getCreatedAt);
+        }
+    }
+
 
     @Override
     @Transactional
@@ -390,10 +545,24 @@ public class SettlementServiceImpl implements SettlementService {
         List<Long> orderIds = records.stream()
             .map(SettlementRecord::getOrderId)
             .filter(id -> id != null && id > 0)
+            .distinct() // 去重避免重复查询
             .collect(Collectors.toList());
         Map<Long, OrderRecord> orderMap;
         if (!orderIds.isEmpty()) {
-            List<OrderRecord> orders = orderRecordMapper.selectBatchIds(orderIds);
+            // 优化：只查询需要的字段，减少数据传输量
+            LambdaQueryWrapper<OrderRecord> orderWrapper = new LambdaQueryWrapper<>();
+            orderWrapper.select(
+                OrderRecord::getId,
+                OrderRecord::getStatus,
+                OrderRecord::getAmount,
+                OrderRecord::getCreatedBy,
+                OrderRecord::getOrderTime,
+                OrderRecord::getSn,
+                OrderRecord::getModel,
+                OrderRecord::getOrderDate,
+                OrderRecord::getCurrency
+            ).in(OrderRecord::getId, orderIds);
+            List<OrderRecord> orders = orderRecordMapper.selectList(orderWrapper);
             orderMap = orders.stream().collect(Collectors.toMap(OrderRecord::getId, o -> o));
         } else {
             orderMap = Collections.emptyMap();
@@ -401,9 +570,11 @@ public class SettlementServiceImpl implements SettlementService {
         List<String> trackingNumbers = records.stream()
             .map(SettlementRecord::getTrackingNumber)
             .filter(StringUtils::hasText)
+            .distinct() // 去重避免重复查询
             .collect(Collectors.toList());
         Map<String, List<String>> submissionMap = new HashMap<>();
         if (!trackingNumbers.isEmpty()) {
+            // 优化：只查询需要的字段
             LambdaQueryWrapper<UserSubmission> submissionWrapper = new LambdaQueryWrapper<>();
             submissionWrapper.select(UserSubmission::getTrackingNumber, UserSubmission::getUsername, UserSubmission::getOwnerUsername);
             submissionWrapper.in(UserSubmission::getTrackingNumber, trackingNumbers);

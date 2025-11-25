@@ -47,14 +47,38 @@
           </el-select>
         </el-form-item>
         <el-form-item label="批次号">
-          <el-input v-model="filters.batch" placeholder="例如 BATCH-20250118" clearable />
-        </el-form-item>
-        <el-form-item label="复合搜索">
           <el-input
-            v-model="filters.keyword"
-            placeholder="单号 / 型号 / SN"
+            v-model="filters.batch"
+            placeholder="例如 BATCH-20250118"
             clearable
-            style="width: 220px"
+            @clear="handleInputClear"
+          />
+        </el-form-item>
+        <el-form-item label="单号">
+          <el-input
+            v-model="filters.trackingNumber"
+            placeholder="输入单号"
+            clearable
+            style="width: 200px"
+            @clear="handleInputClear"
+          />
+        </el-form-item>
+        <el-form-item label="型号">
+          <el-input
+            v-model="filters.model"
+            placeholder="输入型号"
+            clearable
+            style="width: 200px"
+            @clear="handleInputClear"
+          />
+        </el-form-item>
+        <el-form-item label="SN">
+          <el-input
+            v-model="filters.orderSn"
+            placeholder="输入 SN"
+            clearable
+            style="width: 200px"
+            @clear="handleInputClear"
           />
         </el-form-item>
         <el-form-item label="日期">
@@ -97,40 +121,75 @@
     <el-card class="table-card">
       <el-table
         ref="tableRef"
-        :data="records"
+        :data="sortedRecords"
         v-loading="loading"
         height="520"
+        :default-sort="defaultSort"
+        highlight-current-row
+        :current-row="currentRow"
+        :row-class-name="rowClassName"
         @selection-change="handleSelection"
         @row-click="handleRowClick"
+        @sort-change="handleSortChange"
       >
         <el-table-column type="selection" width="48" />
-        <el-table-column prop="trackingNumber" label="单号" width="160" />
+        <el-table-column
+          prop="trackingNumber"
+          label="单号"
+          width="160"
+          sortable="custom"
+          :sort-orders="['ascending', 'descending']"
+        />
         <el-table-column prop="model" label="型号" width="160">
           <template #default="{ row }">{{ row.model || '-' }}</template>
         </el-table-column>
         <el-table-column prop="orderSn" label="SN" width="180">
           <template #default="{ row }">{{ row.orderSn || '-' }}</template>
         </el-table-column>
-        <el-table-column prop="amount" label="结账金额" width="180">
+        <el-table-column
+          prop="amount"
+          label="结账金额"
+          width="180"
+          sortable="custom"
+          :sort-orders="['ascending', 'descending']"
+        >
           <template #default="{ row }">￥{{ formatAmount(row.amount) }}</template>
         </el-table-column>
         <el-table-column prop="ownerUsername" label="归属用户" width="140">
           <template #default="{ row }">{{ row.ownerUsername || '-' }}</template>
         </el-table-column>
-        <el-table-column prop="orderTime" label="下单时间" width="180">
+        <el-table-column
+          prop="orderTime"
+          label="下单时间"
+          width="180"
+          sortable="custom"
+          :sort-orders="['ascending', 'descending']"
+        >
           <template #default="{ row }">{{ formatDate(row.orderTime) }}</template>
         </el-table-column>
         <el-table-column prop="orderAmount" label="订单金额" width="140">
           <template #default="{ row }">￥{{ formatAmount(row.orderAmount) }}</template>
         </el-table-column>
-        <el-table-column prop="status" label="状态" width="120">
+        <el-table-column
+          prop="status"
+          label="状态"
+          width="120"
+          sortable="custom"
+          :sort-orders="['ascending', 'descending']"
+        >
           <template #default="{ row }">
             <el-tag :type="row.status === 'CONFIRMED' ? 'success' : 'warning'">
               {{ row.status === 'CONFIRMED' ? '已确认' : '待结账' }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="orderStatus" label="订单状态" width="140">
+        <el-table-column
+          prop="orderStatus"
+          label="订单状态"
+          width="140"
+          sortable="custom"
+          :sort-orders="['ascending', 'descending']"
+        >
           <template #default="{ row }">
             <el-tag v-if="row.orderStatus" :type="row.orderStatus === 'PAID' ? 'success' : 'info'">
               {{ statusLabel(row.orderStatus) }}
@@ -275,7 +334,7 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, computed, watch } from 'vue';
+import { reactive, ref, computed, watch, nextTick } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import type { TableInstance } from 'element-plus';
 import {
@@ -316,10 +375,14 @@ const filters = reactive({
   status: '',
   batch: '',
   ownerUsername: '',
-  keyword: '',
+  trackingNumber: '',
+  model: '',
+  orderSn: '',
   dateRange: [] as string[],
   page: 1,
-  size: Number.isNaN(savedPageSize) ? 50 : savedPageSize
+  size: Number.isNaN(savedPageSize) ? 50 : savedPageSize,
+  sortProp: 'orderTime',
+  sortOrder: 'ascending' as SortOrder
 });
 
 const records = ref<SettlementRecord[]>([]);
@@ -327,10 +390,16 @@ const total = ref(0);
 const loading = ref(false);
 const exporting = ref(false);
 const tableRef = ref<TableInstance>();
+const currentRow = ref<SettlementRecord | null>(null);
+const defaultSort = { prop: 'orderTime', order: 'ascending' as const };
+type SortOrder = 'ascending' | 'descending' | null;
+const sortState = reactive<{ prop: string; order: SortOrder }>({
+  prop: defaultSort.prop,
+  order: defaultSort.order
+});
 
 const selectedIds = ref<number[]>([]);
 const selectedRecords = ref<SettlementRecord[]>([]);
-const autoSearchSuspended = ref(false);
 
 const submissionUserOptions = ref<string[]>([]);
 const modelOptions = ref<string[]>([]);
@@ -370,7 +439,11 @@ const params = computed<SettlementFilterRequest>(() => {
     status: filters.status || undefined,
     batch: filters.batch || undefined,
     ownerUsername: filters.ownerUsername?.trim() || undefined,
-    keyword: filters.keyword?.trim() || undefined
+    trackingNumber: filters.trackingNumber?.trim() || undefined,
+    model: filters.model?.trim() || undefined,
+    orderSn: filters.orderSn?.trim() || undefined,
+    sortProp: filters.sortProp || undefined,
+    sortOrder: filters.sortOrder || undefined
   };
   if (Array.isArray(filters.dateRange) && filters.dateRange.length === 2) {
     result.startDate = filters.dateRange[0];
@@ -379,25 +452,44 @@ const params = computed<SettlementFilterRequest>(() => {
   return result;
 });
 
+// getSortValue 和 getTimeValue 已移除，改为服务端排序
+
+const sortedRecords = computed(() => {
+  // 移除客户端过滤和排序，所有逻辑由服务端完成
+  return records.value;
+});
+
+const sanitizeIdentifier = (value: string) => value ? value.replace(/\s+/g, '') : '';
+
+// hasFilters、hasSearch 和 matchRow 已移除，改为服务端过滤
+
 const loadData = async () => {
   loading.value = true;
   try {
-    const data = await fetchSettlements(params.value);
-    records.value = data.records;
-    total.value = data.total;
+    filters.trackingNumber = sanitizeIdentifier(filters.trackingNumber);
+    filters.orderSn = sanitizeIdentifier(filters.orderSn);
+
+    console.log('查询参数:', params.value);
+
+    // 后端已支持所有筛选条件，直接使用分页查询即可
+    const data: any = await fetchSettlements(params.value);
+
+    console.log('后端返回数据:', data);
+    console.log('记录数量:', data?.records?.length, '总数:', data?.total);
+
+    records.value = data.records || [];
+    total.value = data.total || 0;
+
+    console.log('更新后的 records.value:', records.value.length);
+
     refreshFilterOptions();
+    focusFirstMatch();
   } finally {
     loading.value = false;
   }
 };
 
-const triggerAutoSearch = () => {
-  if (autoSearchSuspended.value) {
-    return;
-  }
-  filters.page = 1;
-  loadData();
-};
+// triggerAutoSearch 已移除，改为手动点击查询按钮触发
 
 const refreshFilterOptions = () => {
   const submissionSet = new Set<string>();
@@ -415,15 +507,26 @@ const refreshFilterOptions = () => {
 };
 
 const resetFilters = () => {
-  autoSearchSuspended.value = true;
+  // 先清空数据，减少渲染压力
+  records.value = [];
+  total.value = 0;
+
+  // 清空筛选条件
   filters.status = '';
   filters.batch = '';
   filters.ownerUsername = '';
-  filters.keyword = '';
+  filters.trackingNumber = '';
+  filters.model = '';
+  filters.orderSn = '';
   filters.dateRange = [];
   filters.page = 1;
-  autoSearchSuspended.value = false;
+
+  // 重置后立即加载数据
   loadData();
+};
+
+const handleInputClear = () => {
+  resetFilters();
 };
 
 const handleSizeChange = (size: number) => {
@@ -438,15 +541,39 @@ const handlePageChange = (page: number) => {
   loadData();
 };
 
-watch(() => filters.status, triggerAutoSearch);
-watch(() => filters.batch, triggerAutoSearch);
-watch(() => filters.ownerUsername, triggerAutoSearch);
-watch(() => filters.keyword, triggerAutoSearch);
-watch(() => filters.dateRange, triggerAutoSearch, { deep: true });
+// 移除自动搜索的 watch，改为手动点击查询按钮触发
 
 const handleSelection = (rows: SettlementRecord[]) => {
   selectedRecords.value = rows;
   selectedIds.value = rows.map(row => row.id);
+};
+
+const focusFirstMatch = () => {
+  // 服务端已经过滤数据，不需要客户端再次匹配
+  // 简单选中第一行
+  if (sortedRecords.value.length > 0) {
+    const target = sortedRecords.value[0];
+    currentRow.value = target;
+    nextTick(() => {
+      tableRef.value?.setCurrentRow(target);
+    });
+  } else {
+    currentRow.value = null;
+  }
+};
+
+const rowClassName = () => {
+  // 移除客户端高亮逻辑，所有数据都是服务端过滤后的结果
+  return '';
+};
+
+const handleSortChange = (options: { prop: string; order: SortOrder }) => {
+  sortState.prop = options.prop ?? '';
+  sortState.order = options.order ?? null;
+  filters.sortProp = sortState.prop;
+  filters.sortOrder = sortState.order;
+  filters.page = 1;
+  loadData();
 };
 
 const handleRowClick = (row: SettlementRecord) => {
@@ -732,6 +859,8 @@ const formatAmount = (value?: number) => {
 
 const statusLabel = (value?: string) => settlementStatusMap[value ?? ''] || '未知';
 
+// fetchAllSettlements 已移除，改为后端直接过滤返回结果
+
 loadData();
 </script>
 
@@ -749,5 +878,9 @@ loadData();
 
 .amount-text {
   font-weight: 600;
+}
+
+.highlight-row {
+  background: #f0f9eb !important;
 }
 </style>
