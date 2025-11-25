@@ -227,6 +227,8 @@
       title="批量导入中"
       width="360px"
       :show-close="false"
+      :close-on-click-modal="false"
+      :close-on-press-escape="false"
       align-center
     >
       <p class="muted" style="margin-bottom: 12px">正在上传并解析文件，请稍候…</p>
@@ -541,12 +543,15 @@ const handleFileChange = async (event: Event) => {
   const prevSnapshot = await captureDiffSnapshot().catch(() => new Map());
   try {
     const report = await importOrders(file);
+    finishImportProgress();
     ElMessage.success('导入成功');
     const latest = await fetchAllOrders().catch(() => []);
     scheduleDiffCalculation(prevSnapshot, latest);
     loadOrders();
-  } finally {
+  } catch (error) {
     finishImportProgress();
+    throw error;
+  } finally {
     target.value = '';
   }
 };
