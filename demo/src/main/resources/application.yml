@@ -23,6 +23,21 @@ spring:
     caffeine:
       spec: maximumSize=5000,expireAfterWrite=30m
 
+  # Redis 配置
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      database: ${REDIS_DATABASE:0}
+      timeout: 2000ms
+      lettuce:
+        pool:
+          max-active: 8      # 最大连接数
+          max-idle: 8        # 最大空闲连接
+          min-idle: 2        # 最小空闲连接
+          max-wait: 1000ms   # 连接池最大等待时间
+
   servlet:
     multipart:
       max-file-size: 50MB
@@ -48,8 +63,8 @@ sa-token:
 logging:
   level:
     root: warn                 # 全局 WARN，减少 IO
-    com.example.demo: info     # 业务包 INFO
-
+    com.example.demo: info     # 业务包 INFO  #启用DEBUG日志查看缓存命中情况：
+    com.example.demo.settlement.service.SettlementCacheService: debug
 app:
   settlement:
     warn-double-billing: true

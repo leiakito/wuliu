@@ -26,6 +26,7 @@ import com.example.demo.settlement.dto.SettlementExportRequest;
 import com.example.demo.settlement.dto.SettlementFilterRequest;
 import com.example.demo.settlement.entity.SettlementRecord;
 import com.example.demo.settlement.mapper.SettlementRecordMapper;
+import com.example.demo.settlement.service.SettlementCacheService;
 import com.example.demo.settlement.service.SettlementService;
 import java.io.IOException;
 import java.math.BigDecimal;
@@ -50,6 +51,7 @@ public class SettlementServiceImpl implements SettlementService {
     private final HardwarePriceMapper hardwarePriceMapper;
     private final UserSubmissionMapper userSubmissionMapper;
     private final AppProperties appProperties;
+    private final SettlementCacheService cacheService;
 
     @Override
     @Transactional
@@ -121,6 +123,14 @@ public class SettlementServiceImpl implements SettlementService {
         if (!StringUtils.hasText(target)) {
             return null;
         }
+
+        // 尝试从缓存获取
+        BigDecimal cachedPrice = cacheService.getHardwarePrice(target, date);
+        if (cachedPrice != null) {
+            return cachedPrice;
+        }
+
+        // 缓存未命中，查询数据库
         LambdaQueryWrapper<HardwarePrice> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(HardwarePrice::getPriceDate, date);
         List<HardwarePrice> prices = hardwarePriceMapper.selectList(wrapper);
@@ -133,7 +143,10 @@ public class SettlementServiceImpl implements SettlementService {
                 continue;
             }
             if (target.equalsIgnoreCase(name) || target.contains(name) || name.contains(target)) {
-                return price.getPrice();
+                BigDecimal result = price.getPrice();
+                // 写入缓存
+                cacheService.cacheHardwarePrice(target, date, result);
+                return result;
             }
         }
         return null;
@@ -633,23 +646,45 @@ public class SettlementServiceImpl implements SettlementService {
         if (CollectionUtils.isEmpty(trackingNumbers)) {
             return Collections.emptyMap();
         }
-        LambdaQueryWrapper<UserSubmission> submissionWrapper = new LambdaQueryWrapper<>();
-        submissionWrapper.select(UserSubmission::getTrackingNumber, UserSubmission::getOwnerUsername, UserSubmission::getUsername);
-        submissionWrapper.in(UserSubmission::getTrackingNumber, trackingNumbers);
-        List<UserSubmission> submissions = userSubmissionMapper.selectList(submissionWrapper);
-        Map<String, String> map = new HashMap<>();
-        submissions.forEach(submission -> {
-            if (!StringUtils.hasText(submission.getTrackingNumber())) {
-                return;
+
+        // 尝试从缓存批量获取
+        Map<String, String> cachedOwners = cacheService.getOwnerUsernames(trackingNumbers);
+
+        // 找出缓存未命中的 tracking numbers
+        Set<String> uncachedNumbers = trackingNumbers.stream()
+                .filter(tn -> !cachedOwners.containsKey(tn))
+                .collect(Collectors.toSet());
+
+        Map<String, String> result = new HashMap<>(cachedOwners);
+
+        // 只查询缓存未命中的数据
+        if (!uncachedNumbers.isEmpty()) {
+            LambdaQueryWrapper<UserSubmission> submissionWrapper = new LambdaQueryWrapper<>();
+            submissionWrapper.select(UserSubmission::getTrackingNumber, UserSubmission::getOwnerUsername, UserSubmission::getUsername);
+            submissionWrapper.in(UserSubmission::getTrackingNumber, uncachedNumbers);
+            List<UserSubmission> submissions = userSubmissionMapper.selectList(submissionWrapper);
+
+            Map<String, String> newOwners = new HashMap<>();
+            submissions.forEach(submission -> {
+                if (!StringUtils.hasText(submission.getTrackingNumber())) {
+                    return;
+                }
+                String owner = StringUtils.hasText(submission.getOwnerUsername())
+                    ? submission.getOwnerUsername()
+                    : submission.getUsername();
+                if (StringUtils.hasText(owner)) {
+                    newOwners.putIfAbsent(submission.getTrackingNumber(), owner);
+                }
+            });
+
+            // 将新查询的数据写入缓存
+            if (!newOwners.isEmpty()) {
+                cacheService.cacheOwnerUsernames(newOwners);
+                result.putAll(newOwners);
             }
-            String owner = StringUtils.hasText(submission.getOwnerUsername())
-                ? submission.getOwnerUsername()
-                : submission.getUsername();
-            if (StringUtils.hasText(owner)) {
-                map.putIfAbsent(submission.getTrackingNumber(), owner);
-            }
-        });
-        return map;
+        }
+
+        return result;
     }
 
     private IPage<SettlementRecord> emptyPage(SettlementFilterRequest request) {

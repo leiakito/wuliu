@@ -17,7 +17,73 @@
 3. **复合索引** - 新增8个复合索引优化常见查询
 4. **慢查询监控** - 自动记录超过1秒的操作
 
+## 🔥 Redis缓存优化（v2.1）
+
+本次更新新增Redis缓存支持：
+
+1. **热点数据缓存** - 归属用户和硬件价格缓存
+2. **批量操作优化** - 使用Redis批量查询减少数据库压力
+3. **预期收益** - 减少50-70%的关联查询，提升响应速度
+
 ## 部署步骤
+
+### 0. 安装并启动Redis（新增）
+
+**安装Redis：**
+
+```bash
+# macOS (使用 Homebrew)
+brew install redis
+
+# Ubuntu/Debian
+sudo apt-get install redis-server
+
+# CentOS/RHEL
+sudo yum install redis
+
+# Docker 方式（推荐用于开发）
+docker run -d --name redis -p 6379:6379 redis:latest
+```
+
+**启动Redis：**
+
+```bash
+# macOS
+brew services start redis
+
+# Linux (systemd)
+sudo systemctl start redis
+
+# Docker
+docker start redis
+
+# 验证Redis是否运行
+redis-cli ping
+# 应该返回 PONG
+```
+
+**配置Redis连接（可选）：**
+
+如果Redis不在本地或需要密码，编辑 `application.yml`：
+
+```yaml
+spring:
+  data:
+    redis:
+      host: your-redis-host    # 默认: localhost
+      port: 6379               # 默认: 6379
+      password: your-password  # 如果需要密码
+      database: 0              # 默认: 0
+```
+
+或使用环境变量：
+
+```bash
+export REDIS_HOST=localhost
+export REDIS_PORT=6379
+export REDIS_PASSWORD=your-password  # 可选
+export REDIS_DATABASE=0
+```
 
 ### 1. 执行数据库优化脚本
 
@@ -60,7 +126,32 @@ cd /Volumes/GT/wuliudanzi/demo
 java -jar target/demo-*.jar
 ```
 
-### 3. 验证修复
+### 3. 验证Redis连接
+
+启动应用后，检查日志是否有Redis连接成功的信息：
+
+```
+INFO  o.s.d.r.c.RepositoryConfigurationDelegate - Bootstrapping Spring Data Redis repositories
+INFO  c.e.d.config.RedisConfig - Redis配置初始化完成
+```
+
+使用Redis CLI验证缓存：
+
+```bash
+# 连接到Redis
+redis-cli
+
+# 查看所有键
+127.0.0.1:6379> KEYS settlement:*
+
+# 查看缓存统计
+127.0.0.1:6379> INFO stats
+
+# 监控实时命令（可选）
+127.0.0.1:6379> MONITOR
+```
+
+### 4. 验证修复
 
 #### 测试SN精确查询
 
@@ -83,7 +174,7 @@ java -jar target/demo-*.jar
 
 每个SN都应该返回准确的匹配记录，不会返回相同运单号的其他订单。
 
-### 4. 性能测试
+### 5. 性能测试
 
 执行以下查询，观察响应时间改善：
 
@@ -93,6 +184,41 @@ java -jar target/demo-*.jar
 4. **SN查询** - 应该使用 `idx_settlement_order_id` 索引
 
 可以在MySQL中使用 `EXPLAIN` 查看索引使用情况。
+
+#### 测试Redis缓存效果
+
+**测试归属用户缓存：**
+
+1. 第一次查询结算列表 - 查看日志：
+   ```
+   DEBUG c.e.d.s.s.SettlementCacheService - 批量缓存命中 - 归属用户: 0/20
+   ```
+
+2. 再次查询相同数据 - 查看日志：
+   ```
+   DEBUG c.e.d.s.s.SettlementCacheService - 批量缓存命中 - 归属用户: 20/20
+   ```
+
+**测试硬件价格缓存：**
+
+1. 创建结算记录时会自动查询硬件价格
+2. 第一次查询 - 日志显示缓存未命中，从数据库查询
+3. 后续查询相同型号和日期 - 日志显示缓存命中
+
+**Redis中的缓存数据示例：**
+
+```bash
+127.0.0.1:6379> KEYS settlement:*
+1) "settlement:owner:YT2344094385032"
+2) "settlement:owner:YT2344094385033"
+3) "settlement:price:IPHONE14PROMAX256GB:2024-01-15"
+
+127.0.0.1:6379> GET "settlement:owner:YT2344094385032"
+"\"admin\""
+
+127.0.0.1:6379> TTL "settlement:owner:YT2344094385032"
+(integer) 21458  # 剩余秒数（6小时TTL）
+```
 
 ### 5. 清理调试代码（可选）
 
@@ -222,6 +348,12 @@ WHERE id > 12345 ORDER BY id DESC LIMIT 20;
 - [ ] 深层分页速度正常（第40+页 < 300ms）
 - [ ] 慢查询日志正常记录
 - [ ] EXPLAIN 显示索引被正确使用
+
+**Redis缓存：**
+- [ ] Redis服务正常运行（redis-cli ping 返回 PONG）
+- [ ] 应用启动时连接Redis成功
+- [ ] 第二次查询缓存命中率提升
+- [ ] Redis中可以看到 settlement:* 键
 
 ## 回滚方案
 

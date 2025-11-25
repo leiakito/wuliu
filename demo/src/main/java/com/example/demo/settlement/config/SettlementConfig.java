@@ -4,6 +4,7 @@ import com.example.demo.config.AppProperties;
 import com.example.demo.hardware.mapper.HardwarePriceMapper;
 import com.example.demo.order.mapper.OrderRecordMapper;
 import com.example.demo.settlement.mapper.SettlementRecordMapper;
+import com.example.demo.settlement.service.SettlementCacheService;
 import com.example.demo.settlement.service.SettlementService;
 import com.example.demo.settlement.service.impl.SettlementServiceImpl;
 import com.example.demo.submission.mapper.UserSubmissionMapper;
@@ -20,7 +21,15 @@ public class SettlementConfig {
                                                OrderRecordMapper orderRecordMapper,
                                                HardwarePriceMapper hardwarePriceMapper,
                                                UserSubmissionMapper userSubmissionMapper,
-                                               AppProperties appProperties) {
-        return new SettlementServiceImpl(settlementRecordMapper, orderRecordMapper, hardwarePriceMapper, userSubmissionMapper, appProperties);
+                                               AppProperties appProperties,
+                                               SettlementCacheService settlementCacheService) {
+        return new SettlementServiceImpl(
+            settlementRecordMapper,
+            orderRecordMapper,
+            hardwarePriceMapper,
+            userSubmissionMapper,
+            appProperties,
+            settlementCacheService
+        );
     }
 }
