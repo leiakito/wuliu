@@ -217,8 +217,14 @@ public class UserSubmissionServiceImpl implements UserSubmissionService {
     }
 
     private OrderRecord findOrder(String trackingNumber) {
+        if (!StringUtils.hasText(trackingNumber)) {
+            return null;
+        }
         LambdaQueryWrapper<OrderRecord> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(OrderRecord::getTrackingNumber, trackingNumber);
+        wrapper.eq(OrderRecord::getTrackingNumber, trackingNumber.trim())
+            .orderByDesc(OrderRecord::getOrderTime)
+            .orderByDesc(OrderRecord::getCreatedAt)
+            .last("LIMIT 1");
         return orderRecordMapper.selectOne(wrapper);
     }
 

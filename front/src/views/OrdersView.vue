@@ -122,7 +122,7 @@
         <el-table-column prop="model" label="型号" />
         <el-table-column prop="sn" label="SN" width="180">
           <template #default="{ row }">
-            <span :class="['sn-text', { 'sn-duplicate': isSnDuplicate(row.sn) }]">{{ row.sn }}</span>
+            <span class="sn-text">{{ row.sn }}</span>
           </template>
         </el-table-column>
         <el-table-column prop="status" label="状态" width="160">
@@ -302,25 +302,12 @@ const tableData = computed(() => (isAdmin.value ? orders.value : userOrders.valu
 const tableLoading = computed(() => (isAdmin.value ? loading.value : userSearchLoading.value));
 const USER_HISTORY_KEY = 'user-order-history';
 const quickStatus = ref('');
-const duplicateSnSet = computed(() => {
-  const counts = new Map<string, number>();
-  tableData.value.forEach(order => {
-    if (order.sn) {
-      counts.set(order.sn, (counts.get(order.sn) ?? 0) + 1);
-    }
-  });
-  return new Set(Array.from(counts.entries()).filter(([, count]) => count > 1).map(([sn]) => sn));
-});
 const filteredTableData = computed(() =>
   tableData.value.filter(order => {
     const statusMatch = !quickStatus.value || order.status === quickStatus.value;
     return statusMatch;
   })
 );
-const isSnDuplicate = (sn?: string) => {
-  if (!sn) return false;
-  return duplicateSnSet.value.has(sn);
-};
 
 const createVisible = ref(false);
 const createLoading = ref(false);
@@ -521,8 +508,7 @@ const handleFileChange = async (event: Event) => {
     const latest = await fetchAllOrders().catch(() => []);
     appendDiffNotices([
       ...computeDifferences(prevSnapshot, latest),
-      ...computeSnConflicts(latest),
-      ...buildSnDuplicateNotices(report?.duplicateSnDetail)
+      // SN 重复校验已取消
     ]);
     loadOrders();
   } finally {
@@ -576,8 +562,7 @@ const submitCreate = async () => {
     const prevSnapshot = await captureDiffSnapshot().catch(() => new Map());
     const latest = await fetchAllOrders().catch(() => []);
     appendDiffNotices([
-      ...computeDifferences(prevSnapshot, latest),
-      ...computeSnConflicts(latest)
+      ...computeDifferences(prevSnapshot, latest)
     ]);
     loadOrders();
   } finally {
@@ -709,42 +694,7 @@ const appendDiffNotices = (notices: DiffNotice[]) => {
   diffNotices.value = [...diffNotices.value, ...notices];
 };
 
-const computeSnConflicts = (orders: OrderRecord[]) => {
-  const map = new Map<string, OrderRecord[]>();
-  orders.forEach(order => {
-    const sn = order.sn?.trim();
-    if (!sn) return;
-    map.set(sn, [...(map.get(sn) ?? []), order]);
-  });
-  const conflicts: DiffNotice[] = [];
-  map.forEach((list, sn) => {
-    if (list.length > 1) {
-      const trackingNums = list.map(item => item.trackingNumber).filter(Boolean).join('、');
-      conflicts.push({
-        trackingNumber: trackingNums || '多条记录',
-        message: `SN 重复：${sn}`,
-        before: {},
-        after: {}
-      });
-    }
-  });
-  return conflicts;
-};
-
-const buildSnDuplicateNotices = (snDetail?: Record<string, string[]>) => {
-  if (!snDetail) return [];
-  const notices: DiffNotice[] = [];
-  Object.entries(snDetail).forEach(([sn, trackings]) => {
-    const list = (trackings || []).filter(Boolean).join('、');
-    notices.push({
-      trackingNumber: list || 'SN重复',
-      message: `SN 重复会按照数据库SN最后显示的位置去录入,：${sn}`,
-      before: {},
-      after: {}
-    });
-  });
-  return notices;
-};
+// SN 重复校验已取消
 
 const exportDiffNotices = () => {
   if (!diffNotices.value.length) {
@@ -784,7 +734,7 @@ const exportDiffNotices = () => {
 const submitEdit = async () => {
   if (!editDialog.targetId) return;
   editDialog.loading = true;
-    const prevSnapshot = await captureDiffSnapshot().catch(() => new Map());
+  const prevSnapshot = await captureDiffSnapshot().catch(() => new Map());
   try {
     const payload: OrderUpdateRequest = {
       trackingNumber: editDialog.form.trackingNumber,

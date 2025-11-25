@@ -121,8 +121,9 @@ public class OrderServiceImpl implements OrderService {
         wrapper.eq(OrderRecord::getSn, request.getSn());
         OrderRecord existed = orderRecordMapper.selectOne(wrapper);
         if (existed != null) {
-            throw new BusinessException(ErrorCode.DUPLICATE, "SN 已存在");
+            throw new BusinessException(ErrorCode.DUPLICATE, "单号已存在，请勿重复提交");
         }
+        
         OrderRecord record = new OrderRecord();
         record.setOrderDate(request.getOrderDate());
         if (record.getOrderDate() != null && request.getOrderTime() == null) {

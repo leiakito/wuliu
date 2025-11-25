@@ -501,7 +501,10 @@ public class SettlementServiceImpl implements SettlementService {
         }
         if (order == null && record.getTrackingNumber() != null && !record.getTrackingNumber().isBlank()) {
             LambdaQueryWrapper<OrderRecord> wrapper = new LambdaQueryWrapper<>();
-            wrapper.eq(OrderRecord::getTrackingNumber, record.getTrackingNumber());
+            wrapper.eq(OrderRecord::getTrackingNumber, record.getTrackingNumber().trim())
+                .orderByDesc(OrderRecord::getOrderTime)
+                .orderByDesc(OrderRecord::getCreatedAt)
+                .last("LIMIT 1");
             order = orderRecordMapper.selectOne(wrapper);
         }
         if (order == null) {
@@ -535,7 +538,10 @@ public class SettlementServiceImpl implements SettlementService {
         }
         if (record.getTrackingNumber() != null && !record.getTrackingNumber().isBlank()) {
             LambdaQueryWrapper<OrderRecord> wrapper = new LambdaQueryWrapper<>();
-            wrapper.eq(OrderRecord::getTrackingNumber, record.getTrackingNumber());
+            wrapper.eq(OrderRecord::getTrackingNumber, record.getTrackingNumber().trim())
+                .orderByDesc(OrderRecord::getOrderTime)
+                .orderByDesc(OrderRecord::getCreatedAt)
+                .last("LIMIT 1");
             return orderRecordMapper.selectOne(wrapper);
         }
         return null;
