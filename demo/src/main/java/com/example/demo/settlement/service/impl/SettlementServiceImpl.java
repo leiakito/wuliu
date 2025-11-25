@@ -18,6 +18,8 @@ import com.example.demo.submission.mapper.UserSubmissionMapper;
 import com.example.demo.settlement.dto.SettlementAmountRequest;
 import com.example.demo.settlement.dto.SettlementBatchConfirmRequest;
 import com.example.demo.settlement.dto.SettlementBatchPriceRequest;
+import com.example.demo.settlement.dto.SettlementBatchSnPriceRequest;
+import com.example.demo.settlement.dto.SettlementBatchSnPriceResponse;
 import com.example.demo.settlement.dto.SettlementConfirmRequest;
 import com.example.demo.settlement.dto.SettlementExportRequest;
 import com.example.demo.settlement.dto.SettlementFilterRequest;
@@ -581,5 +583,130 @@ public class SettlementServiceImpl implements SettlementService {
             .replaceAll("[^\\p{IsAlphabetic}\\p{IsDigit}\\u4e00-\\u9fa5]", "")
             .toUpperCase();
         return cleaned.trim();
+    }
+
+    @Override
+    @Transactional
+    public SettlementBatchSnPriceResponse updateAmountBySn(SettlementBatchSnPriceRequest request) {
+        if (CollectionUtils.isEmpty(request.getSns())) {
+            return new SettlementBatchSnPriceResponse(0, List.of());
+        }
+
+        // 去重并清理 SN 列表（保留原始大小写）
+        Set<String> uniqueSns = request.getSns().stream()
+            .map(String::trim)
+            .filter(StringUtils::hasText)
+            .collect(Collectors.toSet());
+
+        if (uniqueSns.isEmpty()) {
+            return new SettlementBatchSnPriceResponse(0, List.of());
+        }
+
+        // 规范化SN用于匹配（转大写）
+        Set<String> normalizedSns = uniqueSns.stream()
+            .map(String::toUpperCase)
+            .collect(Collectors.toSet());
+
+        // 首先通过 SN 查询对应的 OrderRecord
+        LambdaQueryWrapper<OrderRecord> orderWrapper = new LambdaQueryWrapper<>();
+        orderWrapper.in(OrderRecord::getSn, uniqueSns);
+        List<OrderRecord> orders = orderRecordMapper.selectList(orderWrapper);
+
+        if (orders.isEmpty()) {
+            return new SettlementBatchSnPriceResponse(0, List.of());
+        }
+
+        // 创建 SN / ID / Tracking 到 OrderRecord 的映射，便于精准匹配
+        Map<String, OrderRecord> snToOrderMap = new HashMap<>();
+        Map<Long, OrderRecord> idToOrderMap = new HashMap<>();
+        Map<String, List<OrderRecord>> trackingToOrders = new HashMap<>();
+        orders.forEach(order -> {
+            if (StringUtils.hasText(order.getSn())) {
+                snToOrderMap.put(order.getSn().toUpperCase(), order);
+            }
+            if (order.getId() != null) {
+                idToOrderMap.put(order.getId(), order);
+            }
+            if (StringUtils.hasText(order.getTrackingNumber())) {
+                trackingToOrders.computeIfAbsent(order.getTrackingNumber(), k -> new ArrayList<>()).add(order);
+            }
+        });
+
+        // 提取 tracking numbers
+        Set<String> trackingNumbers = orders.stream()
+            .map(OrderRecord::getTrackingNumber)
+            .filter(StringUtils::hasText)
+            .collect(Collectors.toSet());
+
+        if (trackingNumbers.isEmpty()) {
+            return new SettlementBatchSnPriceResponse(0, List.of());
+        }
+
+        // 查询对应的结算记录
+        LambdaQueryWrapper<SettlementRecord> settlementWrapper = new LambdaQueryWrapper<>();
+        settlementWrapper.in(SettlementRecord::getTrackingNumber, trackingNumbers);
+        List<SettlementRecord> allSettlements = settlementRecordMapper.selectList(settlementWrapper);
+
+        if (allSettlements.isEmpty()) {
+            return new SettlementBatchSnPriceResponse(0, List.of());
+        }
+
+        // 关键修复：只更新匹配输入SN的结算记录，且只更新没有价格的
+        List<SettlementRecord> toUpdate = new ArrayList<>();
+        Set<Long> toUpdateOrderIds = new HashSet<>();
+        Set<String> skippedSnSet = new LinkedHashSet<>(); // 已有价格的SN，去重
+
+        for (SettlementRecord settlement : allSettlements) {
+            // 通过 orderId 查找对应的订单
+            OrderRecord matchedOrder = null;
+            if (settlement.getOrderId() != null && settlement.getOrderId() > 0) {
+                matchedOrder = idToOrderMap.get(settlement.getOrderId());
+            }
+
+            // 如果通过 orderId 没找到，且仅当该运单号只对应唯一订单时再按 trackingNumber 匹配，避免误匹配其他 SN
+            if (matchedOrder == null && StringUtils.hasText(settlement.getTrackingNumber())) {
+                List<OrderRecord> candidates = trackingToOrders.get(settlement.getTrackingNumber());
+                if (candidates != null && candidates.size() == 1) {
+                    matchedOrder = candidates.get(0);
+                }
+            }
+
+            // 检查订单的SN是否在输入的SN列表中
+            if (matchedOrder != null && StringUtils.hasText(matchedOrder.getSn())) {
+                String orderSnNormalized = matchedOrder.getSn().toUpperCase();
+                if (normalizedSns.contains(orderSnNormalized)) {
+                    // 核心逻辑：检查是否已有价格
+                    boolean hasPrice = settlement.getAmount() != null &&
+                                      settlement.getAmount().compareTo(BigDecimal.ZERO) > 0;
+
+                    if (hasPrice) {
+                        // 已有价格，跳过并记录
+                        skippedSnSet.add(matchedOrder.getSn());
+                    } else {
+                        // 没有价格，加入更新列表
+                        toUpdate.add(settlement);
+                        if (matchedOrder.getId() != null) {
+                            toUpdateOrderIds.add(matchedOrder.getId());
+                        }
+                    }
+                }
+            }
+        }
+
+        // 更新结算记录的金额（只更新没有价格的）
+        toUpdate.forEach(record -> {
+            record.setAmount(request.getAmount());
+            settlementRecordMapper.updateById(record);
+        });
+
+        // 同步更新订单金额（只更新目标订单）
+        if (!toUpdateOrderIds.isEmpty()) {
+            LambdaUpdateWrapper<OrderRecord> orderUpdate = Wrappers.lambdaUpdate();
+            orderUpdate.in(OrderRecord::getId, toUpdateOrderIds);
+            orderUpdate.set(OrderRecord::getAmount, request.getAmount());
+            orderRecordMapper.update(null, orderUpdate);
+        }
+
+        return new SettlementBatchSnPriceResponse(toUpdate.size(), new ArrayList<>(skippedSnSet));
     }
 }

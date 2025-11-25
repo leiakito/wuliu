@@ -14,6 +14,12 @@
         >批量设置价格</el-button>
         <el-button
           v-if="isAdmin"
+          type="primary"
+          plain
+          @click="openBatchSnPriceDialog"
+        >SN批量设置价格</el-button>
+        <el-button
+          v-if="isAdmin"
           type="success"
           plain
           :disabled="!selectedIds.length"
@@ -106,20 +112,7 @@
           <template #default="{ row }">{{ row.orderSn || '-' }}</template>
         </el-table-column>
         <el-table-column prop="amount" label="结账金额" width="180">
-          <template #default="{ row }">
-            <template v-if="isAdmin">
-              <el-input-number
-                v-model="row.amount"
-                :min="0"
-                :step="10"
-                size="small"
-                :controls="false"
-                :disabled="amountUpdating[row.id]"
-                @change="value => handleAmountInline(row, value)"
-              />
-            </template>
-            <template v-else>￥{{ formatAmount(row.amount) }}</template>
-          </template>
+          <template #default="{ row }">￥{{ formatAmount(row.amount) }}</template>
         </el-table-column>
         <el-table-column prop="ownerUsername" label="归属用户" width="140">
           <template #default="{ row }">{{ row.ownerUsername || '-' }}</template>
@@ -148,15 +141,8 @@
         <el-table-column prop="settleBatch" label="批次" width="180" />
         <el-table-column prop="payableAt" label="应付日期" width="140" />
         <el-table-column prop="remark" label="备注" />
-        <el-table-column label="操作" width="160">
+        <el-table-column label="操作" width="120">
           <template #default="{ row }">
-            <el-button
-              v-if="isAdmin"
-              link
-              type="primary"
-              @click="openAmountDialog(row)">
-              修改金额
-            </el-button>
             <el-button
               v-if="isAdmin && row.status !== 'CONFIRMED'"
               link
@@ -182,7 +168,7 @@
     <el-dialog v-model="confirmDialog.visible" title="确认结账" width="480px">
       <el-form label-width="100px">
         <el-form-item label="金额">
-          <el-input-number v-model="confirmDialog.form.amount" :min="0" :step="10" />
+          <div class="amount-text">￥{{ formatAmount(confirmDialog.form.amount) }}</div>
         </el-form-item>
         <el-form-item label="备注">
           <el-input v-model="confirmDialog.form.remark" type="textarea" :rows="3" />
@@ -232,9 +218,6 @@
 
     <el-dialog v-model="batchConfirmDialog.visible" title="批量确认" width="420px">
       <el-form label-width="100px">
-        <el-form-item label="金额">
-          <el-input-number v-model="batchConfirmDialog.form.amount" :min="0" :step="10" placeholder="保留原金额" />
-        </el-form-item>
         <el-form-item label="备注">
           <el-input v-model="batchConfirmDialog.form.remark" type="textarea" :rows="3" />
         </el-form-item>
@@ -245,18 +228,47 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="amountDialog.visible" title="修改金额" width="420px">
+    <el-dialog v-model="batchSnPriceDialog.visible" title="SN批量设置价格" width="520px">
       <el-form label-width="100px">
+        <el-form-item label="SN列表">
+          <el-input
+            v-model="batchSnPriceDialog.form.snInput"
+            type="textarea"
+            :rows="6"
+            placeholder="支持多个SN，使用换行/逗号/分号分隔"
+          />
+          <div style="margin-top: 8px; font-size: 12px; color: #909399;">
+            已识别 {{ batchSnPriceDialog.parsedSns.length }} 个SN
+            <span v-if="batchSnPriceDialog.duplicateSns.length > 0" style="color: #f56c6c;">
+              (发现 {{ batchSnPriceDialog.duplicateSns.length }} 个重复)
+            </span>
+          </div>
+        </el-form-item>
         <el-form-item label="金额">
-          <el-input-number v-model="amountDialog.form.amount" :min="0" :step="10" />
+          <el-input-number v-model="batchSnPriceDialog.form.amount" :min="0" :step="10" />
         </el-form-item>
-        <el-form-item label="备注">
-          <el-input v-model="amountDialog.form.remark" type="textarea" :rows="3" />
-        </el-form-item>
+        <el-alert
+          v-if="batchSnPriceDialog.duplicateSns.length > 0"
+          type="warning"
+          :closable="false"
+          style="margin-bottom: 12px;"
+        >
+          <template #title>
+            <div>检测到重复SN，将跳过以下SN：</div>
+            <div style="margin-top: 8px; max-height: 100px; overflow-y: auto;">
+              {{ batchSnPriceDialog.duplicateSns.join('、') }}
+            </div>
+          </template>
+        </el-alert>
       </el-form>
       <template #footer>
-        <el-button @click="amountDialog.visible = false">取消</el-button>
-        <el-button type="primary" :loading="amountDialog.loading" @click="submitAmount">保存</el-button>
+        <el-button @click="batchSnPriceDialog.visible = false">取消</el-button>
+        <el-button
+          type="primary"
+          :loading="batchSnPriceDialog.loading"
+          @click="submitBatchSnPrice"
+          :disabled="batchSnPriceDialog.parsedSns.length === 0"
+        >保存</el-button>
       </template>
     </el-dialog>
   </div>
@@ -273,7 +285,8 @@ import {
   exportSettlements,
   updateSettlementPriceByModel,
   confirmSettlementsBatch,
-  updateSettlementAmount
+  updateSettlementAmount,
+  updateSettlementPriceBySn
 } from '@/api/settlements';
 import type {
   SettlementRecord,
@@ -282,7 +295,7 @@ import type {
   SettlementExportRequest,
   SettlementBatchPriceRequest,
   SettlementBatchConfirmRequest,
-  SettlementAmountRequest
+  SettlementBatchSnPriceRequest
 } from '@/types/models';
 import { useAuthStore } from '@/store/auth';
 
@@ -318,7 +331,6 @@ const tableRef = ref<TableInstance>();
 const selectedIds = ref<number[]>([]);
 const selectedRecords = ref<SettlementRecord[]>([]);
 const autoSearchSuspended = ref(false);
-const amountUpdating = reactive<Record<number, boolean>>({});
 
 const submissionUserOptions = ref<string[]>([]);
 const modelOptions = ref<string[]>([]);
@@ -343,11 +355,12 @@ const batchConfirmDialog = reactive({
   form: { amount: null as number | null, remark: '' }
 });
 
-const amountDialog = reactive({
+const batchSnPriceDialog = reactive({
   visible: false,
   loading: false,
-  targetId: 0,
-  form: { amount: 0, remark: '' }
+  form: { snInput: '', amount: null as number | null },
+  parsedSns: [] as string[],
+  duplicateSns: [] as string[]
 });
 
 const params = computed<SettlementFilterRequest>(() => {
@@ -441,20 +454,6 @@ const handleRowClick = (row: SettlementRecord) => {
   tableRef.value?.toggleRowSelection(row, !alreadySelected);
 };
 
-const handleAmountInline = async (row: SettlementRecord, value?: number) => {
-  if (!isAdmin.value) return;
-  if (value === undefined || value === null) return;
-  amountUpdating[row.id] = true;
-  try {
-    await updateSettlementAmount(row.id, { amount: value, remark: row.remark });
-    row.amount = value;
-    row.orderAmount = value;
-    ElMessage.success('金额已更新');
-  } finally {
-    amountUpdating[row.id] = false;
-  }
-};
-
 const openBatchPriceDialog = () => {
   if (!isAdmin.value) return;
   batchPriceDialog.form.scope = selectedIds.value.length ? 'SELECTION' : 'MODEL';
@@ -480,14 +479,6 @@ const openConfirm = (row: SettlementRecord) => {
   confirmDialog.targetId = row.id;
   confirmDialog.form.amount = row.amount ?? row.orderAmount ?? 0;
   confirmDialog.form.remark = row.remark ?? '';
-};
-
-const openAmountDialog = (row: SettlementRecord) => {
-  if (!isAdmin.value) return;
-  amountDialog.targetId = row.id;
-  amountDialog.form.amount = row.amount ?? row.orderAmount ?? 0;
-  amountDialog.form.remark = row.remark ?? '';
-  amountDialog.visible = true;
 };
 
 const submitConfirm = async () => {
@@ -558,7 +549,7 @@ const submitBatchPrice = async () => {
     }
     batchPriceDialog.loading = true;
     try {
-      const payload: SettlementAmountRequest = {
+      const payload = {
         amount: batchPriceDialog.form.amount,
         remark: undefined
       };
@@ -596,23 +587,109 @@ const submitBatchConfirm = async () => {
   }
 };
 
-const submitAmount = async () => {
+const openBatchSnPriceDialog = () => {
   if (!isAdmin.value) return;
-  if (!amountDialog.targetId) return;
-  amountDialog.loading = true;
+  batchSnPriceDialog.form.snInput = '';
+  batchSnPriceDialog.form.amount = null;
+  batchSnPriceDialog.parsedSns = [];
+  batchSnPriceDialog.duplicateSns = [];
+  batchSnPriceDialog.visible = true;
+};
+
+const parseSns = (input: string): string[] => {
+  return input
+    .split(/[\n,;]/)
+    .map(sn => sn.trim())
+    .filter(sn => sn.length > 0);
+};
+
+const findDuplicateSns = (sns: string[]): string[] => {
+  const snSet = new Set<string>();
+  const duplicates = new Set<string>();
+
+  sns.forEach(sn => {
+    const normalizedSn = sn.toUpperCase();
+    if (snSet.has(normalizedSn)) {
+      duplicates.add(sn);
+    } else {
+      snSet.add(normalizedSn);
+    }
+  });
+
+  return Array.from(duplicates);
+};
+
+const submitBatchSnPrice = async () => {
+  if (!isAdmin.value) return;
+
+  const sns = parseSns(batchSnPriceDialog.form.snInput);
+  const duplicates = findDuplicateSns(sns);
+
+  // 更新显示的解析结果和重复项
+  batchSnPriceDialog.parsedSns = sns;
+  batchSnPriceDialog.duplicateSns = duplicates;
+
+  if (sns.length === 0) {
+    ElMessage.warning('请输入至少一个SN');
+    return;
+  }
+
+  if (batchSnPriceDialog.form.amount === null || batchSnPriceDialog.form.amount === undefined) {
+    ElMessage.warning('请输入金额');
+    return;
+  }
+
+  // 过滤掉重复的SN
+  const uniqueSns = sns.filter(sn => !duplicates.includes(sn));
+
+  if (uniqueSns.length === 0) {
+    ElMessage.warning('所有SN都重复，无法设置价格');
+    return;
+  }
+
+  batchSnPriceDialog.loading = true;
   try {
-    const payload: SettlementAmountRequest = {
-      amount: amountDialog.form.amount,
-      remark: amountDialog.form.remark || undefined
+    const payload: SettlementBatchSnPriceRequest = {
+      sns: uniqueSns,
+      amount: batchSnPriceDialog.form.amount
     };
-    await updateSettlementAmount(amountDialog.targetId, payload);
-    ElMessage.success('金额已更新');
-    amountDialog.visible = false;
+
+    const result = await updateSettlementPriceBySn(payload);
+    const updatedCount = result?.updatedCount ?? 0;
+    const skippedSns = result?.skippedSns ?? [];
+
+    // 构建提示消息
+    let message = `已更新 ${updatedCount} 个SN的价格`;
+
+    if (duplicates.length > 0) {
+      message += `，跳过 ${duplicates.length} 个重复输入的SN`;
+    }
+
+    if (skippedSns && skippedSns.length > 0) {
+      message += `，跳过 ${skippedSns.length} 个已有价格的SN`;
+      ElMessage.warning({
+        message: `${message}\n已有价格的SN: ${skippedSns.join('、')}`,
+        duration: 5000,
+        showClose: true
+      });
+    } else {
+      ElMessage.success(message);
+    }
+
+    batchSnPriceDialog.visible = false;
     loadData();
   } finally {
-    amountDialog.loading = false;
+    batchSnPriceDialog.loading = false;
   }
 };
+
+// 监听输入变化，实时解析SN和检测重复
+watch(() => batchSnPriceDialog.form.snInput, (input) => {
+  const sns = parseSns(input);
+  const duplicates = findDuplicateSns(sns);
+  batchSnPriceDialog.parsedSns = sns;
+  batchSnPriceDialog.duplicateSns = duplicates;
+});
 
 const downloadExcel = async (params: SettlementExportRequest, fileName = 'settlements.xlsx') => {
   const response = await exportSettlements(params);
@@ -668,5 +745,9 @@ loadData();
   display: flex;
   gap: 12px;
   flex-wrap: wrap;
+}
+
+.amount-text {
+  font-weight: 600;
 }
 </style>

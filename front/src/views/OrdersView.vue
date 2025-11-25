@@ -236,7 +236,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref, watch, onBeforeUnmount } from 'vue';
+import { computed, reactive, ref, watch, onBeforeUnmount, onMounted } from 'vue';
 import type { FormInstance, FormRules } from 'element-plus';
 import { ElMessage } from 'element-plus';
 import { fetchOrders, fetchOrdersWithConfig, createOrder, importOrders, updateOrderStatus, searchOrders, fetchCategoryStats } from '@/api/orders';
@@ -294,6 +294,8 @@ type DiffNotice = {
   after?: Partial<OrderRecord>;
 };
 const diffNotices = ref<DiffNotice[]>([]);
+const DIFF_NOTICE_KEY = 'orders-diff-notices';
+const destroyed = ref(false);
 const userSearchInput = ref('');
 const userSearchLoading = ref(false);
 const userSearchDebounce = ref<number | null>(null);
@@ -308,6 +310,41 @@ const filteredTableData = computed(() =>
     return statusMatch;
   })
 );
+
+const loadPersistedDiffNotices = (): DiffNotice[] => {
+  try {
+    const raw = localStorage.getItem(DIFF_NOTICE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch (error) {
+    console.warn('Failed to load diff notices', error);
+    return [];
+  }
+};
+
+const persistDiffNotices = (list: DiffNotice[]) => {
+  try {
+    localStorage.setItem(DIFF_NOTICE_KEY, JSON.stringify(list.slice(0, 100)));
+  } catch (error) {
+    console.warn('Failed to persist diff notices', error);
+  }
+};
+
+const mergeDiffNotices = (notices: DiffNotice[]) => {
+  if (!notices.length) return;
+  const merged = [...loadPersistedDiffNotices(), ...notices];
+  persistDiffNotices(merged);
+  if (!destroyed.value) {
+    diffNotices.value = merged;
+  }
+};
+
+onMounted(() => {
+  destroyed.value = false;
+  const stored = loadPersistedDiffNotices();
+  if (stored.length) {
+    diffNotices.value = stored;
+  }
+});
 
 const createVisible = ref(false);
 const createLoading = ref(false);
@@ -506,10 +543,7 @@ const handleFileChange = async (event: Event) => {
     const report = await importOrders(file);
     ElMessage.success('导入成功');
     const latest = await fetchAllOrders().catch(() => []);
-    appendDiffNotices([
-      ...computeDifferences(prevSnapshot, latest),
-      // SN 重复校验已取消
-    ]);
+    scheduleDiffCalculation(prevSnapshot, latest);
     loadOrders();
   } finally {
     finishImportProgress();
@@ -561,9 +595,7 @@ const submitCreate = async () => {
     });
     const prevSnapshot = await captureDiffSnapshot().catch(() => new Map());
     const latest = await fetchAllOrders().catch(() => []);
-    appendDiffNotices([
-      ...computeDifferences(prevSnapshot, latest)
-    ]);
+    scheduleDiffCalculation(prevSnapshot, latest);
     loadOrders();
   } finally {
     createLoading.value = false;
@@ -654,6 +686,7 @@ const computeDifferences = (prevMap: Map<string, Partial<OrderRecord>>, nextList
 
 const removeDiffNotice = (trackingNumber: string) => {
   diffNotices.value = diffNotices.value.filter(item => item.trackingNumber !== trackingNumber);
+  persistDiffNotices(diffNotices.value);
 };
 
 const buildOrderKey = (order: OrderRecord) => {
@@ -689,12 +722,13 @@ const formatDiffValue = (obj: Partial<OrderRecord> | undefined, label: string) =
   return val === undefined || val === null || val === '' ? '-' : val;
 };
 
-const appendDiffNotices = (notices: DiffNotice[]) => {
-  if (!notices.length) return;
-  diffNotices.value = [...diffNotices.value, ...notices];
+const scheduleDiffCalculation = (prevSnapshot: Map<string, Partial<OrderRecord>>, latest: OrderRecord[]) => {
+  // 轻量异步排队，避免阻塞后续操作或导航
+  setTimeout(() => {
+    const diffs = computeDifferences(prevSnapshot, latest);
+    mergeDiffNotices(diffs);
+  }, 0);
 };
-
-// SN 重复校验已取消
 
 const exportDiffNotices = () => {
   if (!diffNotices.value.length) {
@@ -745,7 +779,7 @@ const submitEdit = async () => {
     };
     await updateOrder(editDialog.targetId, payload);
     const latest = await fetchAllOrders();
-    appendDiffNotices(computeDifferences(prevSnapshot, latest));
+    scheduleDiffCalculation(prevSnapshot, latest);
     editDialog.visible = false;
     ElMessage.success('已更新');
     await loadCategoryStats();
@@ -875,6 +909,7 @@ function saveUserOrders() {
 }
 
 onBeforeUnmount(() => {
+  destroyed.value = true;
   if (importProgress.timer) {
     clearInterval(importProgress.timer);
   }

@@ -175,6 +175,16 @@ export interface SettlementAmountRequest {
   remark?: string;
 }
 
+export interface SettlementBatchSnPriceRequest {
+  sns: string[];
+  amount: number;
+}
+
+export interface SettlementBatchSnPriceResponse {
+  updatedCount: number;
+  skippedSns: string[];
+}
+
 export interface DashboardResponse {
   orderCount: number;
   waitingSettlementCount: number;

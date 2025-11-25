@@ -10,6 +10,8 @@ import com.example.demo.common.response.PageResponse;
 import com.example.demo.settlement.dto.SettlementAmountRequest;
 import com.example.demo.settlement.dto.SettlementBatchConfirmRequest;
 import com.example.demo.settlement.dto.SettlementBatchPriceRequest;
+import com.example.demo.settlement.dto.SettlementBatchSnPriceRequest;
+import com.example.demo.settlement.dto.SettlementBatchSnPriceResponse;
 import com.example.demo.settlement.dto.SettlementConfirmRequest;
 import com.example.demo.settlement.dto.SettlementExportRequest;
 import com.example.demo.settlement.dto.SettlementFilterRequest;
@@ -79,6 +81,15 @@ public class SettlementController {
     public ApiResponse<Integer> updatePriceByModel(@Valid @RequestBody SettlementBatchPriceRequest request) {
         int updated = settlementService.updateAmountByModel(request);
         return ApiResponse.ok(updated);
+    }
+
+    @PutMapping("/price-by-sn")
+    @SaCheckRole("ADMIN")
+    @LogOperation("按SN批量设置结算金额")
+    @Operation(summary = "按SN批量设置金额", description = "根据SN列表批量设置结算记录金额，只更新没有价格的SN")
+    public ApiResponse<SettlementBatchSnPriceResponse> updatePriceBySn(@Valid @RequestBody SettlementBatchSnPriceRequest request) {
+        SettlementBatchSnPriceResponse response = settlementService.updateAmountBySn(request);
+        return ApiResponse.ok(response);
     }
 
     @PutMapping("/confirm-batch")

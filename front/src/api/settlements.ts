@@ -7,7 +7,9 @@ import type {
   SettlementExportRequest,
   SettlementBatchPriceRequest,
   SettlementBatchConfirmRequest,
-  SettlementAmountRequest
+  SettlementAmountRequest,
+  SettlementBatchSnPriceRequest,
+  SettlementBatchSnPriceResponse
 } from '@/types/models';
 
 const serializeParams = (params: SettlementExportRequest) => {
@@ -55,3 +57,6 @@ export const confirmSettlementsBatch = (payload: SettlementBatchConfirmRequest) 
 
 export const updateSettlementAmount = (id: number, payload: SettlementAmountRequest) =>
   apiClient.put<void>(`/settlements/${id}/amount`, payload);
+
+export const updateSettlementPriceBySn = (payload: SettlementBatchSnPriceRequest) =>
+  apiClient.put<SettlementBatchSnPriceResponse>('/settlements/price-by-sn', payload);

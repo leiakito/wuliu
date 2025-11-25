@@ -5,6 +5,8 @@ import com.example.demo.order.entity.OrderRecord;
 import com.example.demo.settlement.dto.SettlementAmountRequest;
 import com.example.demo.settlement.dto.SettlementBatchConfirmRequest;
 import com.example.demo.settlement.dto.SettlementBatchPriceRequest;
+import com.example.demo.settlement.dto.SettlementBatchSnPriceRequest;
+import com.example.demo.settlement.dto.SettlementBatchSnPriceResponse;
 import com.example.demo.settlement.dto.SettlementConfirmRequest;
 import com.example.demo.settlement.dto.SettlementExportRequest;
 import com.example.demo.settlement.dto.SettlementFilterRequest;
@@ -30,4 +32,6 @@ public interface SettlementService {
     void confirmBatch(SettlementBatchConfirmRequest request, String operator);
 
     void updateAmount(Long id, SettlementAmountRequest request);
+
+    SettlementBatchSnPriceResponse updateAmountBySn(SettlementBatchSnPriceRequest request);
 }
