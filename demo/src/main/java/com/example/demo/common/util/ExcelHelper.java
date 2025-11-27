@@ -158,54 +158,123 @@ public final class ExcelHelper {
         return result;
     }
 
-    public static byte[] writeSettlements(List<SettlementRecord> records) throws IOException {
-        try (Workbook workbook = new XSSFWorkbook(); ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
-            Sheet sheet = workbook.createSheet("待结账");
-            Row header = sheet.createRow(0);
-            header.createCell(0).setCellValue("时间");
-            header.createCell(1).setCellValue("订单号");
-            header.createCell(2).setCellValue("型号");
-            header.createCell(3).setCellValue("SN码");
-            header.createCell(4).setCellValue("价格");
-            header.createCell(5).setCellValue("备注");
-            header.createCell(6).setCellValue("订单状态");
-            header.createCell(7).setCellValue("归属用户");
-            header.createCell(8).setCellValue("批次");
+public static byte[] writeSettlements(List<SettlementRecord> records) throws IOException {
+    try (Workbook workbook = new XSSFWorkbook(); ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
+        Sheet sheet = workbook.createSheet("待结账");
 
-            Map<String, List<SettlementRecord>> grouped = records.stream()
-                .filter(r -> r.getTrackingNumber() != null && !r.getTrackingNumber().isBlank())
-                .collect(Collectors.groupingBy(r -> r.getTrackingNumber().trim()));
+        // 表头
+        Row header = sheet.createRow(0);
+        header.createCell(0).setCellValue("时间");
+        header.createCell(1).setCellValue("订单号");
+        header.createCell(2).setCellValue("商品名");
+        header.createCell(3).setCellValue("SN/条码");
 
-            int rowIndex = 1;
-            for (Map.Entry<String, List<SettlementRecord>> entry : grouped.entrySet()) {
-                List<SettlementRecord> group = entry.getValue();
-                for (int i = 0; i < group.size(); i++) {
-                    SettlementRecord record = group.get(i);
-                    Row row = sheet.createRow(rowIndex++);
-                    row.createCell(0).setCellValue(formatDateTime(record.getOrderTime()));
-                    row.createCell(1).setCellValue(i == 0 ? entry.getKey() : "");
-                    row.createCell(2).setCellValue(safe(record.getModel()));
-                    row.createCell(3).setCellValue(safe(record.getOrderSn()));
-                    row.createCell(4).setCellValue(record.getAmount() == null ? 0 : record.getAmount().doubleValue());
-                    row.createCell(5).setCellValue(safe(record.getRemark()));
-                    row.createCell(6).setCellValue(safe(record.getStatus()));
-                    row.createCell(7).setCellValue(safe(record.getOwnerUsername()));
-                    row.createCell(8).setCellValue(safe(record.getSettleBatch()));
-                }
+        // --- 1. 按「时间 + 单号」分组 ---
+        Map<String, List<SettlementRecord>> grouped = new HashMap<>();
+        Map<String, LocalDateTime> groupTimeMap = new HashMap<>();
+        for (SettlementRecord r : records) {
+            if (r.getTrackingNumber() == null || r.getTrackingNumber().isBlank()) {
+                continue;
             }
-            for (int c = 0; c <= 8; c++) {
-                sheet.autoSizeColumn(c);
+            LocalDateTime time = candidateTime(r);
+            if (time == null) {
+                time = LocalDateTime.MIN;
             }
-            workbook.write(baos);
-            return baos.toByteArray();
+            String key = buildGroupKey(r.getTrackingNumber().trim(), time);
+            grouped.computeIfAbsent(key, k -> new ArrayList<>()).add(r);
+            groupTimeMap.putIfAbsent(key, time);
         }
+
+        // --- 2. 排序：时间升序，同一时间按单号排序 ---
+        List<Map.Entry<String, List<SettlementRecord>>> orderedGroups = new ArrayList<>(grouped.entrySet());
+        orderedGroups.sort((a, b) -> {
+            LocalDateTime ta = groupTimeMap.getOrDefault(a.getKey(), LocalDateTime.MIN);
+            LocalDateTime tb = groupTimeMap.getOrDefault(b.getKey(), LocalDateTime.MIN);
+            int cmp = ta.compareTo(tb);
+            if (cmp != 0) {
+                return cmp;
+            }
+            return extractTracking(a.getKey()).compareTo(extractTracking(b.getKey()));
+        });
+
+        // --- 3. 输出 ---
+        int rowIndex = 1;
+        for (Map.Entry<String, List<SettlementRecord>> e : orderedGroups) {
+            List<SettlementRecord> group = e.getValue();
+            String tracking = extractTracking(e.getKey());
+            String timeText = formatDateTime(groupTimeMap.getOrDefault(e.getKey(), LocalDateTime.MIN));
+
+            for (int i = 0; i < group.size(); i++) {
+                SettlementRecord r = group.get(i);
+                Row row = sheet.createRow(rowIndex++);
+
+                // 同一单号仅首行显示时间和单号
+                String displayTime = i == 0 ? timeText : "";
+                String displayTracking = i == 0 ? tracking : "";
+                row.createCell(0).setCellValue(displayTime);
+                row.createCell(1).setCellValue(displayTracking);
+                row.createCell(2).setCellValue(safe(r.getModel()));
+                row.createCell(3).setCellValue(safe(r.getOrderSn()));
+            }
+        }
+
+        // 自动列宽
+        for (int c = 0; c <= 3; c++) sheet.autoSizeColumn(c);
+
+        workbook.write(baos);
+        return baos.toByteArray();
+    }
+    }
+
+    // 找到组内最早时间，允许任意年份；为空则返回 MIN 以便排序时置前并显示为空
+    private static LocalDateTime earliestValidTime(List<SettlementRecord> list) {
+        return list.stream()
+            .map(ExcelHelper::candidateTime)
+            .filter(Objects::nonNull)
+            .min(LocalDateTime::compareTo)
+            .orElse(LocalDateTime.MIN);
     }
 
     private static String formatDateTime(LocalDateTime time) {
-        if (time == null) {
+        if (time == null || LocalDateTime.MIN.equals(time)) {
             return "";
         }
-        return time.toString().replace('T', ' ');
+        return time.format(DateTimeFormatter.ofPattern("yyyy/MM/dd HH:mm"));
+    }
+
+    /**
+     * 为导出排序/展示提供候选时间：
+     * 优先 orderTime，其次 confirmedAt、createdAt、updatedAt，最后 payableAt 当天 00:00。
+     */
+    private static LocalDateTime candidateTime(SettlementRecord record) {
+        if (record == null) {
+            return null;
+        }
+        if (record.getOrderTime() != null) {
+            return record.getOrderTime();
+        }
+        if (record.getConfirmedAt() != null) {
+            return record.getConfirmedAt();
+        }
+        if (record.getCreatedAt() != null) {
+            return record.getCreatedAt();
+        }
+        if (record.getUpdatedAt() != null) {
+            return record.getUpdatedAt();
+        }
+        if (record.getPayableAt() != null) {
+            return record.getPayableAt().atStartOfDay();
+        }
+        return null;
+    }
+
+    private static String buildGroupKey(String tracking, LocalDateTime time) {
+        return tracking + "|" + (time == null ? "" : time.toString());
+    }
+
+    private static String extractTracking(String groupKey) {
+        int idx = groupKey.indexOf('|');
+        return idx >= 0 ? groupKey.substring(0, idx) : groupKey;
     }
 
     private static String safe(String input) {

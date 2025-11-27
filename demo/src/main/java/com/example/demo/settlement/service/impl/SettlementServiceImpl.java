@@ -823,18 +823,10 @@ public class SettlementServiceImpl implements SettlementService {
         }
 
         // 创建 SN / ID / Tracking 到 OrderRecord 的映射，便于精准匹配
-        Map<String, OrderRecord> snToOrderMap = new HashMap<>();
         Map<Long, OrderRecord> idToOrderMap = new HashMap<>();
-        Map<String, List<OrderRecord>> trackingToOrders = new HashMap<>();
         orders.forEach(order -> {
-            if (StringUtils.hasText(order.getSn())) {
-                snToOrderMap.put(order.getSn().toUpperCase(), order);
-            }
             if (order.getId() != null) {
                 idToOrderMap.put(order.getId(), order);
-            }
-            if (StringUtils.hasText(order.getTrackingNumber())) {
-                trackingToOrders.computeIfAbsent(order.getTrackingNumber(), k -> new ArrayList<>()).add(order);
             }
         });
 
@@ -843,6 +835,19 @@ public class SettlementServiceImpl implements SettlementService {
             .map(OrderRecord::getTrackingNumber)
             .filter(StringUtils::hasText)
             .collect(Collectors.toSet());
+
+        // 拉取所有共享这些运单号的订单，用于判定唯一性，避免误匹配其他 SN
+        Map<String, List<OrderRecord>> trackingToOrders = new HashMap<>();
+        if (!trackingNumbers.isEmpty()) {
+            LambdaQueryWrapper<OrderRecord> trackingOrderWrapper = new LambdaQueryWrapper<>();
+            trackingOrderWrapper.in(OrderRecord::getTrackingNumber, trackingNumbers);
+            List<OrderRecord> ordersByTracking = orderRecordMapper.selectList(trackingOrderWrapper);
+            ordersByTracking.forEach(order -> {
+                if (StringUtils.hasText(order.getTrackingNumber())) {
+                    trackingToOrders.computeIfAbsent(order.getTrackingNumber(), k -> new ArrayList<>()).add(order);
+                }
+            });
+        }
 
         if (trackingNumbers.isEmpty()) {
             return new SettlementBatchSnPriceResponse(0, List.of());

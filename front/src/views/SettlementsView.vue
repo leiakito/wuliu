@@ -46,14 +46,6 @@
             <el-option label="已确认" value="CONFIRMED" />
           </el-select>
         </el-form-item>
-        <el-form-item label="批次号">
-          <el-input
-            v-model="filters.batch"
-            placeholder="例如 BATCH-20250118"
-            clearable
-            @clear="handleInputClear"
-          />
-        </el-form-item>
         <el-form-item label="单号">
           <el-input
             v-model="filters.trackingNumber"
@@ -134,6 +126,15 @@
       >
         <el-table-column type="selection" width="48" />
         <el-table-column
+          prop="orderTime"
+          label="下单时间"
+          width="180"
+          sortable="custom"
+          :sort-orders="['ascending', 'descending']"
+        >
+          <template #default="{ row }">{{ formatDate(row.orderTime) }}</template>
+        </el-table-column>
+        <el-table-column
           prop="trackingNumber"
           label="单号"
           width="160"
@@ -157,18 +158,6 @@
         </el-table-column>
         <el-table-column prop="ownerUsername" label="归属用户" width="140">
           <template #default="{ row }">{{ row.ownerUsername || '-' }}</template>
-        </el-table-column>
-        <el-table-column
-          prop="orderTime"
-          label="下单时间"
-          width="180"
-          sortable="custom"
-          :sort-orders="['ascending', 'descending']"
-        >
-          <template #default="{ row }">{{ formatDate(row.orderTime) }}</template>
-        </el-table-column>
-        <el-table-column prop="orderAmount" label="订单金额" width="140">
-          <template #default="{ row }">￥{{ formatAmount(row.orderAmount) }}</template>
         </el-table-column>
         <el-table-column
           prop="status"
@@ -197,7 +186,6 @@
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="settleBatch" label="批次" width="180" />
         <el-table-column prop="payableAt" label="应付日期" width="140" />
         <el-table-column prop="remark" label="备注" />
         <el-table-column label="操作" width="120">
@@ -373,7 +361,6 @@ const savedPageSize = Number(localStorage.getItem(PAGE_SIZE_KEY)) || 50;
 
 const filters = reactive({
   status: '',
-  batch: '',
   ownerUsername: '',
   trackingNumber: '',
   model: '',
@@ -437,7 +424,6 @@ const params = computed<SettlementFilterRequest>(() => {
     page: filters.page,
     size: filters.size,
     status: filters.status || undefined,
-    batch: filters.batch || undefined,
     ownerUsername: filters.ownerUsername?.trim() || undefined,
     trackingNumber: filters.trackingNumber?.trim() || undefined,
     model: filters.model?.trim() || undefined,
@@ -513,7 +499,6 @@ const resetFilters = () => {
 
   // 清空筛选条件
   filters.status = '';
-  filters.batch = '';
   filters.ownerUsername = '';
   filters.trackingNumber = '';
   filters.model = '';
@@ -604,7 +589,7 @@ const openBatchConfirmDialog = () => {
 const openConfirm = (row: SettlementRecord) => {
   confirmDialog.visible = true;
   confirmDialog.targetId = row.id;
-  confirmDialog.form.amount = row.amount ?? row.orderAmount ?? 0;
+  confirmDialog.form.amount = row.amount ?? 0;
   confirmDialog.form.remark = row.remark ?? '';
 };
 
@@ -655,7 +640,6 @@ const submitBatchPrice = async () => {
       model: batchPriceDialog.form.model.trim(),
       amount: batchPriceDialog.form.amount,
       status: batchPriceDialog.form.status?.trim() || undefined,
-      batch: filters.batch || undefined,
       ownerUsername: filters.ownerUsername?.trim() || undefined
     };
       if (Array.isArray(filters.dateRange) && filters.dateRange.length === 2) {
@@ -834,7 +818,6 @@ const exportData = async () => {
   try {
     const exportParams: SettlementExportRequest = {
       status: filters.status || undefined,
-      batch: filters.batch || undefined,
       ownerUsername: filters.ownerUsername?.trim() || undefined
     };
     if (Array.isArray(filters.dateRange) && filters.dateRange.length === 2) {
