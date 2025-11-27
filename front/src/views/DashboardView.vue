@@ -239,8 +239,126 @@ const clearResults = () => {
   results.value = [];
 };
 
+const escapeCsv = (value: unknown) => {
+  const str = value === null || value === undefined ? '' : String(value);
+  if (/[",\n]/.test(str)) {
+    return `"${str.replace(/"/g, '""')}"`;
+  }
+  return str;
+};
+
+const parseDate = (value?: string): Date | null => {
+  if (!value) return null;
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d;
+};
+
+const formatDateTimeStrict = (value?: string) => {
+  const d = parseDate(value);
+  if (!d) return '';
+  const pad = (n: number) => n.toString().padStart(2, '0');
+  return `${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
+
 const exportResults = () => {
-  ElMessage.success('导出功能开发中');
+  if (!results.value.length) {
+    ElMessage.warning('没有可导出的数据');
+    return;
+  }
+
+  // 列：时间、订单号、商品名、SN/条码、价格、备注、(空3列)、归属人
+  const headers = ['时间', '订单号', '商品名', 'SN/条码', '价格', '备注', '', '', '', '归属人'];
+
+  type Group = {
+    key: string;
+    time: Date | null;
+    timeText: string;
+    tracking: string;
+    items: OrderRecord[];
+  };
+
+  const groupMap = new Map<string, Group>();
+  const buildKey = (tracking: string, time: Date | null) => `${tracking}|${time ? time.toISOString() : ''}`;
+
+  const candidateTime = (item: OrderRecord): Date | null =>
+    parseDate(item.orderTime) ||
+    parseDate(item.createdAt) ||
+    parseDate(item.updatedAt) ||
+    (item.orderDate ? new Date(`${item.orderDate}T00:00:00`) : null);
+
+  results.value.forEach(item => {
+    const tracking = item.trackingNumber?.trim() || '';
+    if (!tracking) return;
+    const time = candidateTime(item);
+    const key = buildKey(tracking, time);
+    if (!groupMap.has(key)) {
+      groupMap.set(key, {
+        key,
+        time,
+        timeText: time ? formatDateTimeStrict(time.toISOString()) : '',
+        tracking,
+        items: []
+      });
+    }
+    groupMap.get(key)!.items.push(item);
+  });
+
+  const groups = Array.from(groupMap.values()).sort((a, b) => {
+    const ta = a.time?.getTime() ?? 0;
+    const tb = b.time?.getTime() ?? 0;
+    if (ta !== tb) return ta - tb;
+    return a.tracking.localeCompare(b.tracking);
+  });
+
+  const rows: string[][] = [];
+  let lastOwner = '';
+  groups.forEach(group => {
+    const byOwner = group.items.reduce<Record<string, OrderRecord[]>>((acc, cur) => {
+      const owner = (cur.createdBy ?? '').trim();
+      acc[owner] = acc[owner] || [];
+      acc[owner].push(cur);
+      return acc;
+    }, {});
+    const ownerEntries = Object.entries(byOwner).sort((a, b) => a[0].localeCompare(b[0]));
+
+    let firstRowInGroup = true;
+    ownerEntries.forEach(([owner, items]) => {
+      if (lastOwner && owner !== lastOwner) {
+        // 插入3行空行
+        rows.push(new Array(headers.length).fill(''));
+        rows.push(new Array(headers.length).fill(''));
+        rows.push(new Array(headers.length).fill(''));
+      }
+      lastOwner = owner;
+
+      items.forEach((item, idx) => {
+        const displayTime = firstRowInGroup && idx === 0 ? group.timeText : '';
+        const displayTracking = firstRowInGroup && idx === 0 ? group.tracking : '';
+        firstRowInGroup = false;
+        rows.push([
+          displayTime,
+          displayTracking,
+          item.model ?? '',
+          item.sn ?? '',
+          item.amount?.toString() ?? '',
+          item.remark ?? '',
+          '',
+          '',
+          '',
+          owner || ''
+        ]);
+      });
+    });
+  });
+
+  const csv = [headers, ...rows].map(r => r.map(escapeCsv).join(',')).join('\n');
+  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `dashboard-results-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  window.URL.revokeObjectURL(url);
 };
 
 const goOrders = () => {

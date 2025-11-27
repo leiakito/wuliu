@@ -40,6 +40,9 @@ export const confirmSettlement = (id: number, payload: SettlementConfirmRequest)
 export const deleteSettlements = (ids: number[]) =>
   apiClient.delete<void>('/settlements', { data: ids });
 
+export const deleteConfirmedSettlements = () =>
+  apiClient.delete<number>('/settlements/confirmed');
+
 export const exportSettlements = async (params: SettlementExportRequest) => {
   const response = await apiClient.get('/settlements/export', {
     params,

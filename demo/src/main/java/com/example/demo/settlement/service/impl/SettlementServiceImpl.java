@@ -920,4 +920,19 @@ public class SettlementServiceImpl implements SettlementService {
 
         return new SettlementBatchSnPriceResponse(toUpdate.size(), new ArrayList<>(skippedSnSet));
     }
+
+    @Override
+    @Transactional
+    public int deleteConfirmed() {
+        log.info("开始删除所有已确认的结算记录");
+        LambdaQueryWrapper<SettlementRecord> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(SettlementRecord::getStatus, "CONFIRMED");
+        int count = settlementRecordMapper.delete(wrapper);
+        log.info("已删除 {} 条已确认的结算记录", count);
+
+        // 清除缓存
+        cacheService.evictAllOwnerCache();
+
+        return count;
+    }
 }

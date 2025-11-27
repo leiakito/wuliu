@@ -14,6 +14,14 @@
         >批量设置价格</el-button>
         <el-button
           v-if="isAdmin"
+          type="success"
+          plain
+          @click="exportConfirmed"
+        >
+          导出已确认数据
+        </el-button>
+        <el-button
+          v-if="isAdmin"
           type="primary"
           plain
           @click="openBatchSnPriceDialog"
@@ -172,20 +180,6 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column
-          prop="orderStatus"
-          label="订单状态"
-          width="140"
-          sortable="custom"
-          :sort-orders="['ascending', 'descending']"
-        >
-          <template #default="{ row }">
-            <el-tag v-if="row.orderStatus" :type="row.orderStatus === 'PAID' ? 'success' : 'info'">
-              {{ statusLabel(row.orderStatus) }}
-            </el-tag>
-            <span v-else>-</span>
-          </template>
-        </el-table-column>
         <el-table-column prop="payableAt" label="应付日期" width="140" />
         <el-table-column prop="remark" label="备注" />
         <el-table-column label="操作" width="120">
@@ -215,7 +209,13 @@
     <el-dialog v-model="confirmDialog.visible" title="确认结账" width="480px">
       <el-form label-width="100px">
         <el-form-item label="金额">
-          <div class="amount-text">￥{{ formatAmount(confirmDialog.form.amount) }}</div>
+          <el-input-number
+            v-model="confirmDialog.form.amount"
+            :min="0"
+            :step="10"
+            controls-position="right"
+            style="width: 240px"
+          />
         </el-form-item>
         <el-form-item label="备注">
           <el-input v-model="confirmDialog.form.remark" type="textarea" :rows="3" />
@@ -329,6 +329,7 @@ import {
   fetchSettlements,
   confirmSettlement,
   deleteSettlements,
+  deleteConfirmedSettlements,
   exportSettlements,
   updateSettlementPriceByModel,
   confirmSettlementsBatch,
@@ -825,6 +826,39 @@ const exportData = async () => {
       exportParams.endDate = filters.dateRange[1];
     }
     await downloadExcel(exportParams);
+  } finally {
+    exporting.value = false;
+  }
+};
+
+const exportConfirmed = async () => {
+  try {
+    await ElMessageBox.confirm('导出后会删除已确认的数据，确定继续吗？', '二次确认', {
+      type: 'warning',
+      confirmButtonText: '确定',
+      cancelButtonText: '取消'
+    });
+  } catch {
+    return;
+  }
+
+  exporting.value = true;
+  try {
+    const params: SettlementExportRequest = {
+      status: 'CONFIRMED'
+    };
+    await downloadExcel(params, 'settlements-confirmed.xlsx');
+
+    // 导出后从数据库中删除已确认的数据
+    const deletedCount = await deleteConfirmedSettlements();
+    console.log(`已从数据库删除 ${deletedCount} 条已确认的记录`);
+    ElMessage.success(`已导出并删除 ${deletedCount} 条已确认记录`);
+
+    // 刷新列表
+    loadData();
+  } catch (error) {
+    console.error('导出或删除失败:', error);
+    ElMessage.error('导出或删除操作失败');
   } finally {
     exporting.value = false;
   }

@@ -39,6 +39,13 @@ public class OrderController {
     @SaCheckRole("ADMIN")
     @Operation(summary = "分页查询订单", description = "支持按日期、分类、状态与关键字筛选物流单号")
     public ApiResponse<PageResponse<OrderRecord>> page(OrderFilterRequest request) {
+        // 防御性验证：确保 page 和 size 参数有效
+        if (request.getPage() <= 0) {
+            request.setPage(1);
+        }
+        if (request.getSize() <= 0 || request.getSize() > 1000) {
+            request.setSize(50);
+        }
         IPage<OrderRecord> page = orderService.query(request);
         return ApiResponse.ok(PageResponse.from(page));
     }

@@ -34,6 +34,7 @@ com/example/demo/hardware/service/impl/HardwarePriceServiceImpl.class
 com/example/demo/config/SaTokenConfig.class
 com/example/demo/auth/entity/SysUser.class
 com/example/demo/log/service/impl/SysLogServiceImpl.class
+com/example/demo/common/filter/ParameterSanitizationFilter$SanitizedRequestWrapper.class
 com/example/demo/report/controller/ReportController.class
 com/example/demo/order/dto/OrderCategoryStats.class
 com/example/demo/auth/dto/LoginRequest.class
@@ -47,7 +48,6 @@ com/example/demo/settlement/dto/SettlementAmountRequest.class
 com/example/demo/order/service/impl/OrderServiceImpl.class
 com/example/demo/settlement/dto/SettlementBatchSnPriceRequest.class
 com/example/demo/settlement/dto/SettlementExportRequest.class
-com/example/demo/settlement/config/SettlementConfig.class
 com/example/demo/hardware/dto/HardwarePriceExcelParseResult.class
 com/example/demo/common/aspect/PerformanceMonitorAspect.class
 com/example/demo/order/dto/OrderUpdateRequest.class
@@ -73,6 +73,7 @@ com/example/demo/submission/service/UserSubmissionLogService.class
 com/example/demo/report/service/ReportService.class
 com/example/demo/order/mapper/OrderRecordMapper.class
 com/example/demo/order/dto/OrderFilterRequest.class
+com/example/demo/common/filter/ParameterSanitizationFilter.class
 com/example/demo/order/dto/OrderSearchRequest.class
 com/example/demo/order/util/TrackingCategoryUtil.class
 com/example/demo/config/AppProperties$Settlement.class
@@ -87,5 +88,4 @@ com/example/demo/submission/dto/SubmissionLogQueryRequest.class
 com/example/demo/common/exception/ErrorCode.class
 com/example/demo/common/exception/BusinessException.class
 com/example/demo/submission/entity/UserSubmissionLog.class
-com/example/demo/settlement/service/impl/SettlementServiceImpl.class
 com/example/demo/auth/service/impl/SysUserServiceImpl.class

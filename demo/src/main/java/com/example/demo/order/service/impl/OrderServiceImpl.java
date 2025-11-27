@@ -95,7 +95,45 @@ public class OrderServiceImpl implements OrderService {
                 .or().like(OrderRecord::getSn, request.getKeyword())
                 .or().like(OrderRecord::getModel, request.getKeyword()));
         }
-        wrapper.orderByDesc(OrderRecord::getOrderDate);
+
+        // 动态排序处理
+        if (StringUtils.hasText(request.getSortBy()) && StringUtils.hasText(request.getSortOrder())) {
+            boolean isAsc = "asc".equalsIgnoreCase(request.getSortOrder());
+            // 映射前端字段名到数据库字段
+            switch (request.getSortBy().toLowerCase()) {
+                case "status":
+                    if (isAsc) wrapper.orderByAsc(OrderRecord::getStatus);
+                    else wrapper.orderByDesc(OrderRecord::getStatus);
+                    break;
+                case "orderdate":
+                    if (isAsc) wrapper.orderByAsc(OrderRecord::getOrderDate);
+                    else wrapper.orderByDesc(OrderRecord::getOrderDate);
+                    break;
+                case "ordertime":
+                    if (isAsc) wrapper.orderByAsc(OrderRecord::getOrderTime);
+                    else wrapper.orderByDesc(OrderRecord::getOrderTime);
+                    break;
+                case "trackingnumber":
+                    if (isAsc) wrapper.orderByAsc(OrderRecord::getTrackingNumber);
+                    else wrapper.orderByDesc(OrderRecord::getTrackingNumber);
+                    break;
+                case "model":
+                    if (isAsc) wrapper.orderByAsc(OrderRecord::getModel);
+                    else wrapper.orderByDesc(OrderRecord::getModel);
+                    break;
+                case "sn":
+                    if (isAsc) wrapper.orderByAsc(OrderRecord::getSn);
+                    else wrapper.orderByDesc(OrderRecord::getSn);
+                    break;
+                default:
+                    // 默认按日期降序
+                    wrapper.orderByDesc(OrderRecord::getOrderDate);
+            }
+        } else {
+            // 没有指定排序时，默认按日期降序
+            wrapper.orderByDesc(OrderRecord::getOrderDate);
+        }
+
         return orderRecordMapper.selectPage(page, wrapper);
     }
 

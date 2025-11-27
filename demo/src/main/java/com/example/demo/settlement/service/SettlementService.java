@@ -37,4 +37,6 @@ public interface SettlementService {
     void updateAmount(Long id, SettlementAmountRequest request);
 
     SettlementBatchSnPriceResponse updateAmountBySn(SettlementBatchSnPriceRequest request);
+
+    int deleteConfirmed();
 }

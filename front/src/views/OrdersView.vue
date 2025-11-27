@@ -64,9 +64,9 @@
       </div>
     </el-card>
 
-    <div class="quick-tools">
+    <div class="quick-tools" :class="{ 'has-filter': filters.status }">
       <div class="quick-filter-row">
-        <span class="label">状态：</span>
+        <span class="label">快速筛选：</span>
         <el-check-tag :checked="quickStatus === ''" @click="setStatusFilter('')">全部</el-check-tag>
         <el-check-tag
           v-for="item in statusOptions"
@@ -76,6 +76,11 @@
         >
           {{ item.label }}
         </el-check-tag>
+        <span v-if="filters.status" class="filter-hint">
+          <i class="el-icon-warning"></i>
+          <strong>正在筛选: {{ statusLabel(filters.status) }}</strong>
+          <el-button link type="primary" size="small" @click="clearStatusFilter">清除筛选</el-button>
+        </span>
       </div>
       <div class="quick-filter-row">
         <span class="label">物流公司：</span>
@@ -113,7 +118,13 @@
     </el-card>
 
     <el-card class="table-card">
-      <el-table :data="filteredTableData" v-loading="tableLoading" style="width: 100%">
+      <el-table
+        :data="filteredTableData"
+        v-loading="tableLoading"
+        style="width: 100%"
+        :default-sort="{ prop: sortState.prop, order: sortState.order || undefined }"
+        @sort-change="handleSortChange"
+      >
         <el-table-column prop="orderDate" label="下单日期" width="120" />
         <el-table-column prop="orderTime" label="时间" width="180">
           <template #default="{ row }">{{ formatDateTime(row.orderTime) }}</template>
@@ -125,28 +136,39 @@
             <span class="sn-text">{{ row.sn }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="status" label="状态" width="160">
-          <template #default="{ row }">
-            <template v-if="isAdmin">
-              <el-select
-                :model-value="row.status"
-                size="small"
-                placeholder="状态"
-                @change="status => changeStatus(row, status as string)"
+        <el-table-column prop="amount" label="金额" width="140">
+          <template #default="{ row }">￥{{ formatAmount(row.amount) }}</template>
+        </el-table-column>
+        <el-table-column
+          prop="status"
+          width="160"
+          sortable="custom"
+          :sort-orders="['ascending', 'descending']"
+        >
+          <template #header>
+            <span class="status-header">
+              状态
+              <el-tooltip
+                effect="dark"
+                content="点击箭头循环筛选：全部 → 未打款 → 已打款"
+                placement="top"
               >
-                <el-option v-for="item in statusOptions" :key="item.value" :label="item.label" :value="item.value" />
-              </el-select>
-            </template>
-            <template v-else>
-              <el-tag :type="statusTagType(row.status)">
-                {{ statusLabel(row.status) }}
-              </el-tag>
-            </template>
+                <i class="el-icon-info-filled" style="margin-left: 4px; color: #909399; font-size: 14px;"></i>
+              </el-tooltip>
+              <span v-if="filters.status" class="status-filter-badge">
+                {{ statusLabel(filters.status) }}
+              </span>
+            </span>
+          </template>
+          <template #default="{ row }">
+            <el-tag :type="statusTagType(row.status)">
+              {{ statusLabel(row.status) }}
+            </el-tag>
           </template>
         </el-table-column>
         <el-table-column v-if="isAdmin" label="导入状态" width="140">
           <template #default="{ row }">
-            <el-tag v-if="row.imported" type="success">已录入系统</el-tag>
+            <span v-if="row.imported" class="status-text">已录入系统</span>
             <span v-else>-</span>
           </template>
         </el-table-column>
@@ -241,7 +263,7 @@
 import { computed, reactive, ref, watch, onBeforeUnmount, onMounted } from 'vue';
 import type { FormInstance, FormRules } from 'element-plus';
 import { ElMessage } from 'element-plus';
-import { fetchOrders, fetchOrdersWithConfig, createOrder, importOrders, updateOrderStatus, searchOrders, fetchCategoryStats } from '@/api/orders';
+import { fetchOrders, fetchOrdersWithConfig, createOrder, importOrders, updateOrderStatus, searchOrders, fetchCategoryStats, updateOrder } from '@/api/orders';
 import type { OrderCategoryStats, OrderCreateRequest, OrderRecord, OrderUpdateRequest } from '@/types/models';
 import { useAuthStore } from '@/store/auth';
 
@@ -251,27 +273,61 @@ interface FilterModel {
   keyword: string;
   page: number;
   size: number;
+  sortBy?: string;
+  sortOrder?: string;
 }
 
 const statusOptions = [
-  { label: '未打款', value: 'UNPAID', tag: 'warning' },
-  { label: '未收货', value: 'NOT_RECEIVED', tag: 'info' },
+  { label: '未打款', value: 'UNPAID', tag: 'danger' },
   { label: '已打款', value: 'PAID', tag: 'success' }
 ] as const;
 
+const formatAmount = (value?: number) => {
+  if (value === null || value === undefined) return '0.00';
+  return Number(value).toFixed(2);
+};
+
+type SortOrder = 'ascending' | 'descending' | null;
+
 const PAGE_SIZE_KEY = 'orders-page-size';
-const savedPageSize = Number(localStorage.getItem(PAGE_SIZE_KEY)) || 50;
+const getSavedPageSize = () => {
+  try {
+    const saved = localStorage.getItem(PAGE_SIZE_KEY);
+    if (!saved) return 50;
+
+    // 移除所有非数字字符
+    const cleaned = saved.replace(/[^\d]/g, '');
+    const num = Number(cleaned);
+
+    if (Number.isNaN(num) || num <= 0 || num > 1000) {
+      // 如果值无效，清除并返回默认值
+      localStorage.removeItem(PAGE_SIZE_KEY);
+      return 50;
+    }
+
+    // 如果原始值和清理后的值不同，保存清理后的值
+    if (saved !== String(num)) {
+      localStorage.setItem(PAGE_SIZE_KEY, String(num));
+    }
+
+    return num;
+  } catch (error) {
+    console.error('Error loading page size:', error);
+    localStorage.removeItem(PAGE_SIZE_KEY);
+    return 50;
+  }
+};
 
 const filters = reactive<FilterModel>({
   dateRange: [],
   status: '',
   keyword: '',
   page: 1,
-  size: Number.isNaN(savedPageSize) ? 50 : savedPageSize
+  size: getSavedPageSize()
 });
 
-const EXCEL_PREFIX_PATTERN = /^[='‘’“”"`\u200B-\u200F\uFEFF]+/;
-const EXCEL_PREFIX_MULTILINE_PATTERN = /^[='‘’“”"`\u200B-\u200F\uFEFF]+/gm;
+const EXCEL_PREFIX_PATTERN = /^[='\u2018\u2019"\u201C\u201D`\u200B-\u200F\uFEFF]+/;
+const EXCEL_PREFIX_MULTILINE_PATTERN = /^[='\u2018\u2019"\u201C\u201D`\u200B-\u200F\uFEFF]+/gm;
 
 const sanitizeSingleInput = (value?: string) => {
   if (!value) return '';
@@ -306,12 +362,38 @@ const tableData = computed(() => (isAdmin.value ? orders.value : userOrders.valu
 const tableLoading = computed(() => (isAdmin.value ? loading.value : userSearchLoading.value));
 const USER_HISTORY_KEY = 'user-order-history';
 const quickStatus = ref('');
-const filteredTableData = computed(() =>
-  tableData.value.filter(order => {
-    const statusMatch = !quickStatus.value || order.status === quickStatus.value;
-    return statusMatch;
-  })
-);
+const filteredTableData = computed(() => {
+  let list = tableData.value;
+
+  // 快速筛选（仅在非管理员视图使用，管理员视图通过后端筛选）
+  if (!isAdmin.value && quickStatus.value) {
+    list = list.filter(order => order.status === quickStatus.value);
+  }
+
+  // 前端排序（普通用户视图；管理员视图由后端排序）
+  if (sortState.prop && sortState.order) {
+    const dir = sortState.order === 'ascending' ? 1 : -1;
+    return [...list].sort((a, b) => {
+      if (sortState.prop === 'status') {
+        const order = ['UNPAID', 'PAID'];
+        const ia = order.indexOf(a.status ?? '');
+        const ib = order.indexOf(b.status ?? '');
+        return (ia - ib) * dir;
+      }
+      if (sortState.prop === 'amount') {
+        const va = a.amount ?? 0;
+        const vb = b.amount ?? 0;
+        return va === vb ? 0 : va > vb ? dir : -dir;
+      }
+      const va = (a as any)[sortState.prop];
+      const vb = (b as any)[sortState.prop];
+      if (va === vb) return 0;
+      return va > vb ? dir : -dir;
+    });
+  }
+
+  return list;
+});
 
 const loadPersistedDiffNotices = (): DiffNotice[] => {
   try {
@@ -345,6 +427,25 @@ onMounted(() => {
   const stored = loadPersistedDiffNotices();
   if (stored.length) {
     diffNotices.value = stored;
+  }
+
+  // 清理 localStorage 中的错误数据
+  try {
+    const savedSize = localStorage.getItem(PAGE_SIZE_KEY);
+    if (savedSize) {
+      const cleaned = savedSize.replace(/[^\d]/g, '');
+      const num = Number(cleaned);
+      if (savedSize !== String(num) || Number.isNaN(num) || num <= 0 || num > 1000) {
+        console.warn('Cleaning invalid page size from localStorage:', savedSize);
+        if (num > 0 && num <= 1000) {
+          localStorage.setItem(PAGE_SIZE_KEY, String(num));
+        } else {
+          localStorage.removeItem(PAGE_SIZE_KEY);
+        }
+      }
+    }
+  } catch (error) {
+    console.error('Error cleaning localStorage:', error);
   }
 });
 
@@ -391,20 +492,47 @@ const statusTagType = (value?: string) => {
 };
 
 const setStatusFilter = async (value: string) => {
-  quickStatus.value = quickStatus.value === value ? '' : value;
+  // 如果点击的是当前已选中的状态，则清空；否则切换到新状态
+  if (quickStatus.value === value) {
+    quickStatus.value = '';
+  } else {
+    quickStatus.value = value;
+  }
+
   if (isAdmin.value) {
+    // 同步到表单筛选
     filters.status = quickStatus.value;
+    filters.page = 1;
+    console.log('状态筛选变更:', quickStatus.value || '全部');
+    await loadOrders();
+  }
+};
+
+const clearStatusFilter = async () => {
+  // 清除快速筛选和表单筛选
+  quickStatus.value = '';
+  if (isAdmin.value) {
+    filters.status = '';
     filters.page = 1;
     await loadOrders();
   }
 };
 
 const queryParams = computed(() => {
+  // 清理并验证数字参数
+  const cleanNumber = (val: any, defaultVal: number): number => {
+    const str = String(val).replace(/[^\d]/g, '');
+    const num = Number(str);
+    return Number.isNaN(num) || num <= 0 ? defaultVal : num;
+  };
+
   const params: any = {
-    page: filters.page,
-    size: filters.size,
+    page: cleanNumber(filters.page, 1),
+    size: cleanNumber(filters.size, 50),
     keyword: filters.keyword || undefined,
-    status: filters.status || undefined
+    status: filters.status || undefined,
+    sortBy: filters.sortBy || undefined,
+    sortOrder: filters.sortOrder || undefined
   };
   if (filters.dateRange.length === 2) {
     params.startDate = filters.dateRange[0];
@@ -416,7 +544,6 @@ const queryParams = computed(() => {
 const buildFilterPayload = () => {
   const params: any = {
     keyword: filters.keyword || undefined,
-    category: filters.category || undefined,
     status: filters.status || undefined
   };
   if (filters.dateRange.length === 2) {
@@ -432,7 +559,10 @@ const loadOrders = async () => {
   }
   loading.value = true;
   try {
-    const data = await fetchOrders(queryParams.value);
+    const params = queryParams.value;
+    console.log('📡 请求参数:', JSON.stringify(params, null, 2));
+    const data = await fetchOrders(params);
+    console.log('✅ 收到数据:', data.records.length, '条记录');
     orders.value = data.records;
     total.value = data.total;
   } finally {
@@ -466,14 +596,28 @@ const handleUserSearchInput = (value: string) => {
 };
 
 const handleSizeChange = (size: number) => {
-  filters.size = size;
-  localStorage.setItem(PAGE_SIZE_KEY, String(size));
-  filters.page = 1;
-  loadOrders();
+  try {
+    // 移除任何非数字字符并转换
+    let cleaned = String(size).replace(/[^\d]/g, '');
+    const validSize = Number(cleaned) || 50;
+
+    // 确保范围合理
+    const finalSize = Math.min(Math.max(validSize, 1), 1000);
+
+    filters.size = finalSize;
+    localStorage.setItem(PAGE_SIZE_KEY, String(finalSize));
+    filters.page = 1;
+    loadOrders();
+  } catch (error) {
+    console.error('Error handling size change:', error);
+    filters.size = 50;
+    filters.page = 1;
+    loadOrders();
+  }
 };
 
 const handlePageChange = (page: number) => {
-  filters.page = page;
+  filters.page = Number(page) || 1;
   loadOrders();
 };
 
@@ -482,7 +626,11 @@ const resetFilters = () => {
   filters.status = '';
   filters.keyword = '';
   filters.page = 1;
+  filters.sortBy = undefined;
+  filters.sortOrder = undefined;
   quickStatus.value = '';
+  sortState.prop = '';
+  sortState.order = null;
   loadOrders();
 };
 
@@ -493,14 +641,38 @@ const triggerImport = () => {
 
 const fetchAllOrders = async () => {
   const pageSize = 500;
+  const maxPages = 500; // 最多获取 500 页，防止无限循环
   let page = 1;
   const all: OrderRecord[] = [];
-  while (true) {
-    const data = await fetchOrdersWithConfig({ page, size: pageSize }, { timeout: 60000 });
-    all.push(...data.records);
-    if (data.records.length < pageSize) break;
-    page += 1;
+
+  console.log('开始获取所有订单数据用于差异检测...');
+
+  while (page <= maxPages) {
+    try {
+      const data = await fetchOrdersWithConfig({ page, size: pageSize }, { timeout: 60000 });
+      all.push(...data.records);
+
+      if (page % 10 === 0) {
+        console.log(`已获取 ${page} 页，共 ${all.length} 条记录`);
+      }
+
+      // 如果当前页数据少于 pageSize，说明已到最后一页
+      if (data.records.length < pageSize) {
+        console.log(`获取完成，共 ${all.length} 条记录`);
+        break;
+      }
+
+      page += 1;
+    } catch (error) {
+      console.error(`获取第 ${page} 页数据失败:`, error);
+      break;
+    }
   }
+
+  if (page > maxPages) {
+    console.warn('已达到最大页数限制，可能未获取全部数据');
+  }
+
   return all;
 };
 
@@ -598,9 +770,7 @@ const submitCreate = async () => {
       currency: 'CNY',
       orderTime: undefined
     });
-    const prevSnapshot = await captureDiffSnapshot().catch(() => new Map());
-    const latest = await fetchAllOrders().catch(() => []);
-    scheduleDiffCalculation(prevSnapshot, latest);
+    // 单条新增不需要差异检测，只刷新当前页面数据
     loadOrders();
   } finally {
     createLoading.value = false;
@@ -773,7 +943,6 @@ const exportDiffNotices = () => {
 const submitEdit = async () => {
   if (!editDialog.targetId) return;
   editDialog.loading = true;
-  const prevSnapshot = await captureDiffSnapshot().catch(() => new Map());
   try {
     const payload: OrderUpdateRequest = {
       trackingNumber: editDialog.form.trackingNumber,
@@ -783,11 +952,9 @@ const submitEdit = async () => {
       remark: editDialog.form.remark
     };
     await updateOrder(editDialog.targetId, payload);
-    const latest = await fetchAllOrders();
-    scheduleDiffCalculation(prevSnapshot, latest);
     editDialog.visible = false;
     ElMessage.success('已更新');
-    await loadCategoryStats();
+    // 单条编辑不需要差异检测和统计刷新，只刷新当前页面数据
     loadOrders();
   } finally {
     editDialog.loading = false;
@@ -889,7 +1056,73 @@ watch(userSearchInput, value => {
   }, 400);
 });
 
-watch(() => filters.status, triggerAdminAutoSearch);
+const sortState = reactive<{ prop: string; order: SortOrder }>({ prop: '', order: null });
+
+const handleSortChange = (options: { prop: string; order: SortOrder }) => {
+  // 如果点击的是状态列，实现循环筛选而不是排序
+  if (options.prop === 'status') {
+    // 循环顺序：全部 → 未打款 → 已打款 → 全部
+    let nextStatus = '';
+    if (!filters.status) {
+      nextStatus = 'UNPAID'; // 全部 → 未打款
+    } else if (filters.status === 'UNPAID') {
+      nextStatus = 'PAID'; // 未打款 → 已打款
+    } else {
+      nextStatus = ''; // 已打款 → 全部
+    }
+
+    console.log('🔄 状态列循环筛选:', filters.status || '全部', '→', nextStatus || '全部');
+
+    // 更新筛选状态
+    quickStatus.value = nextStatus;
+    filters.status = nextStatus;
+    filters.page = 1;
+
+    // 清除排序状态（因为我们在筛选，不是排序）
+    sortState.prop = '';
+    sortState.order = null;
+    filters.sortBy = undefined;
+    filters.sortOrder = undefined;
+
+    if (isAdmin.value) {
+      loadOrders();
+    }
+    return;
+  }
+
+  // 其他列保持原有的排序逻辑
+  sortState.prop = options.prop ?? '';
+  sortState.order = options.order ?? null;
+
+  // 更新 filters 并重新加载数据（后端排序）
+  if (isAdmin.value) {
+    if (options.order) {
+      filters.sortBy = options.prop;
+      filters.sortOrder = options.order === 'ascending' ? 'asc' : 'desc';
+    } else {
+      filters.sortBy = undefined;
+      filters.sortOrder = undefined;
+    }
+    filters.page = 1; // 排序后回到第一页
+    loadOrders();
+  }
+};
+
+const loadCategoryStats = async () => {
+  if (!isAdmin.value) return;
+  try {
+    await fetchCategoryStats(buildFilterPayload());
+  } catch (error) {
+    console.warn('Failed to load category stats', error);
+  }
+};
+
+// 监听表单状态筛选，同步到快速筛选（仅同步显示，不触发搜索）
+watch(() => filters.status, (newValue) => {
+  // 同步快速筛选的视觉状态
+  quickStatus.value = newValue;
+});
+
 watch(() => filters.keyword, triggerAdminAutoSearch);
 watch(() => filters.dateRange, triggerAdminAutoSearch, { deep: true });
 
@@ -968,6 +1201,11 @@ onBeforeUnmount(() => {
   box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
 }
 
+.quick-tools.has-filter {
+  background: #fff9e6;
+  border: 2px solid #e6a23c;
+}
+
 .quick-filter-row {
   display: flex;
   align-items: center;
@@ -989,6 +1227,29 @@ onBeforeUnmount(() => {
   cursor: pointer;
 }
 
+.filter-hint {
+  margin-left: 16px;
+  padding: 6px 14px;
+  background: #fff3cd;
+  border: 1px solid #ffc107;
+  border-radius: 6px;
+  color: #856404;
+  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.filter-hint i {
+  font-size: 16px;
+  color: #f59e0b;
+}
+
+.filter-hint strong {
+  font-weight: 600;
+  color: #d97706;
+}
+
 .diff-card {
   margin-top: 16px;
 }
@@ -1006,4 +1267,26 @@ onBeforeUnmount(() => {
   gap: 8px;
 }
 
+.status-text {
+  color: inherit;
+  font-weight: normal;
+}
+
+.status-header {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.status-filter-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  margin-left: 6px;
+  background: #fef0f0;
+  border: 1px solid #fab6b6;
+  border-radius: 4px;
+  color: #f56c6c;
+  font-size: 12px;
+  font-weight: 600;
+}
 </style>

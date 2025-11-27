@@ -74,6 +74,7 @@
 /Volumes/GT/wuliudanzi/demo/src/main/java/com/example/demo/hardware/dto/HardwarePriceExcelParseResult.java
 /Volumes/GT/wuliudanzi/demo/src/main/java/com/example/demo/hardware/controller/HardwarePriceController.java
 /Volumes/GT/wuliudanzi/demo/src/main/java/com/example/demo/common/exception/BusinessException.java
+/Volumes/GT/wuliudanzi/demo/src/main/java/com/example/demo/common/filter/ParameterSanitizationFilter.java
 /Volumes/GT/wuliudanzi/demo/src/main/java/com/example/demo/submission/dto/UserSubmissionBatchRequest.java
 /Volumes/GT/wuliudanzi/demo/src/main/java/com/example/demo/config/MybatisPlusConfig.java
 /Volumes/GT/wuliudanzi/demo/src/main/java/com/example/demo/common/response/ApiResponse.java

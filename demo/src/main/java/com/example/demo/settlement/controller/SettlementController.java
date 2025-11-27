@@ -112,12 +112,22 @@ public class SettlementController {
 
     @DeleteMapping
     @SaCheckRole("ADMIN")
+    @LogOperation("批量删除待结账")
     @Operation(summary = "批量删除待结账", description = "仅限管理员执行的删单操作")
     public ApiResponse<Void> delete(
         @Parameter(description = "需要删除的结算记录 ID 列表", required = true)
         @RequestBody List<Long> ids) {
         settlementService.delete(ids);
         return ApiResponse.ok();
+    }
+
+    @DeleteMapping("/confirmed")
+    @SaCheckRole("ADMIN")
+    @LogOperation("删除所有已确认记录")
+    @Operation(summary = "删除所有已确认记录", description = "删除数据库中所有状态为已确认的结算记录")
+    public ApiResponse<Integer> deleteConfirmed() {
+        int count = settlementService.deleteConfirmed();
+        return ApiResponse.ok(count);
     }
 
     @GetMapping("/export")

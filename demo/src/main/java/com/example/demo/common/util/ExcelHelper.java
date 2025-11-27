@@ -168,6 +168,12 @@ public static byte[] writeSettlements(List<SettlementRecord> records) throws IOE
         header.createCell(1).setCellValue("订单号");
         header.createCell(2).setCellValue("商品名");
         header.createCell(3).setCellValue("SN/条码");
+        header.createCell(4).setCellValue("价格");
+        header.createCell(5).setCellValue("备注");
+        header.createCell(6).setCellValue(" ");
+        header.createCell(7).setCellValue(" ");
+        header.createCell(8).setCellValue(" ");
+        header.createCell(9).setCellValue("归属人");
 
         // --- 1. 按「时间 + 单号」分组 ---
         Map<String, List<SettlementRecord>> grouped = new HashMap<>();
@@ -199,27 +205,68 @@ public static byte[] writeSettlements(List<SettlementRecord> records) throws IOE
 
         // --- 3. 输出 ---
         int rowIndex = 1;
+        String lastOwnerWritten = null;
+
         for (Map.Entry<String, List<SettlementRecord>> e : orderedGroups) {
+
             List<SettlementRecord> group = e.getValue();
             String tracking = extractTracking(e.getKey());
             String timeText = formatDateTime(groupTimeMap.getOrDefault(e.getKey(), LocalDateTime.MIN));
 
-            for (int i = 0; i < group.size(); i++) {
-                SettlementRecord r = group.get(i);
-                Row row = sheet.createRow(rowIndex++);
+            // ====== 新增：按归属人分组 ======
+            Map<String, List<SettlementRecord>> byOwner = group.stream()
+                    .collect(Collectors.groupingBy(r -> safe(r.getOwnerUsername())));
 
-                // 同一单号仅首行显示时间和单号
-                String displayTime = i == 0 ? timeText : "";
-                String displayTracking = i == 0 ? tracking : "";
-                row.createCell(0).setCellValue(displayTime);
-                row.createCell(1).setCellValue(displayTracking);
-                row.createCell(2).setCellValue(safe(r.getModel()));
-                row.createCell(3).setCellValue(safe(r.getOrderSn()));
+            // 按归属人名称排序（为了展示稳定）
+            List<Map.Entry<String, List<SettlementRecord>>> ownerGroups =
+                    new ArrayList<>(byOwner.entrySet());
+            ownerGroups.sort(Map.Entry.comparingByKey());
+
+            boolean firstRowInGroup = true;
+            for (int ownerIdx = 0; ownerIdx < ownerGroups.size(); ownerIdx++) {
+                Map.Entry<String, List<SettlementRecord>> og = ownerGroups.get(ownerIdx);
+                List<SettlementRecord> ownerRecords = og.getValue();
+                String currentOwner = safe(og.getKey());
+
+                // 不同归属人（跨单号也算）之间插入3行空白
+                if (lastOwnerWritten != null && !currentOwner.equals(lastOwnerWritten)) {
+                    for (int i = 0; i < 3; i++) {
+                        sheet.createRow(rowIndex++);
+                    }
+                }
+                lastOwnerWritten = currentOwner;
+
+                // 输出该归属人的所有商品
+                for (int i = 0; i < ownerRecords.size(); i++) {
+
+                    SettlementRecord r = ownerRecords.get(i);
+
+                    Row row = sheet.createRow(rowIndex++);
+
+                    // 单号组内首次写入时间/订单号（仅第一行显示）
+                    String displayTime = firstRowInGroup ? timeText : "";
+                    String displayTracking = firstRowInGroup ? tracking : "";
+                    firstRowInGroup = false;
+
+                    row.createCell(0).setCellValue(displayTime);
+                    row.createCell(1).setCellValue(displayTracking);
+                    row.createCell(2).setCellValue(safe(r.getModel()));
+                    row.createCell(3).setCellValue(safe(r.getOrderSn()));
+                    row.createCell(4).setCellValue(r.getAmount() == null ? 0 : r.getAmount().doubleValue());
+                    row.createCell(5).setCellValue(safe(r.getRemark()));
+
+                    // 6, 7, 8 空白列
+                    row.createCell(6).setCellValue("    ");
+                    row.createCell(7).setCellValue("    ");
+                    row.createCell(8).setCellValue("    ");
+
+                    // 归属人放到第 9 列
+                    row.createCell(9).setCellValue(currentOwner);
+                }
             }
         }
-
         // 自动列宽
-        for (int c = 0; c <= 3; c++) sheet.autoSizeColumn(c);
+        for (int c = 0; c <= 9; c++) sheet.autoSizeColumn(c);
 
         workbook.write(baos);
         return baos.toByteArray();
