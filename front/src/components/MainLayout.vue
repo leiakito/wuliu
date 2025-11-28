@@ -44,13 +44,19 @@
           </el-dropdown>
         </div>
       </el-header>
+      <!-- <el-main class="layout-main">
+        <keep-alive>
+          <router-view v-if="$route.meta.keepAlive" />
+        </keep-alive>
+        <router-view v-if="!$route.meta.keepAlive" />
+      </el-main> -->
       <el-main class="layout-main">
-        <router-view v-slot="{ Component }">
-          <keep-alive>
-            <component :is="Component" />
-          </keep-alive>
-        </router-view>
-      </el-main>
+  <router-view v-slot="{ Component }">
+    <keep-alive :include="keepAliveComponents">
+      <component :is="Component" />
+    </keep-alive>
+  </router-view>
+</el-main>
     </el-container>
   </el-container>
 </template>
@@ -92,6 +98,9 @@ const activeMenu = computed(() => {
 });
 
 const currentTitle = computed(() => route.meta.title ?? '单号总查询');
+
+// 需要被 keep-alive 缓存的组件名称列表
+const keepAliveComponents = ['OrdersView'];
 
 const roleLabel = computed(() => {
   if (auth.user?.role === 'ADMIN') return '管理员';
@@ -159,6 +168,8 @@ watch(
 
 .layout-main {
   background: var(--page-bg);
+  overflow-y: auto;
+  height: calc(100vh - 60px); /* 减去 header 高度 */
 }
 
 .logo {

@@ -82,10 +82,6 @@
           <el-button link type="primary" size="small" @click="clearStatusFilter">清除筛选</el-button>
         </span>
       </div>
-      <div class="quick-filter-row">
-        <span class="label">物流公司：</span>
-        <em class="muted">已移除分类筛选</em>
-      </div>
     </div>
 
     <el-card v-if="isAdmin && diffNotices.length" class="diff-card">
@@ -263,6 +259,13 @@
     </div>
   </div>
 </template>
+
+<script lang="ts">
+// 使用普通 script 块定义组件名，确保 keep-alive 的 include 能正确匹配
+export default {
+  name: 'OrdersView'
+}
+</script>
 
 <script setup lang="ts">
 import { computed, reactive, ref, watch, onBeforeUnmount, onMounted, onActivated, onDeactivated } from 'vue';
@@ -465,7 +468,7 @@ const createForm = reactive<OrderCreateRequest>({
   sn: '',
   remark: '',
   currency: 'CNY',
-  orderTime: undefined
+ 
 });
 
 const createRules: FormRules<OrderCreateRequest> = {
@@ -774,7 +777,7 @@ const submitCreate = async () => {
       remark: '',
       amount: undefined,
       currency: 'CNY',
-      orderTime: undefined
+      
     });
     // 单条新增不需要差异检测，只刷新当前页面数据
     loadOrders();
@@ -1152,42 +1155,162 @@ function saveUserOrders() {
   }
 }
 
+const getScroller = (): HTMLElement => {
+  const candidates: (HTMLElement | null)[] = [
+    document.querySelector('.el-main') as HTMLElement | null,
+    document.querySelector('.el-scrollbar__wrap') as HTMLElement | null,
+    document.scrollingElement as HTMLElement | null,
+    document.documentElement,
+    document.body
+  ];
+  for (const el of candidates) {
+    if (el && el.scrollHeight > el.clientHeight + 1) return el;
+  }
+  return (document.scrollingElement as HTMLElement) ?? document.documentElement ?? document.body;
+};
+
 const scrollToTop = () => {
-  const duration = 150; // 150ms for even faster scroll
-  const start = window.scrollY;
+  const scroller = getScroller();
+  const duration = 150;
+  const start = scroller.scrollTop;
   const startTime = performance.now();
 
   const animateScroll = (currentTime: number) => {
     const elapsed = currentTime - startTime;
     const progress = Math.min(elapsed / duration, 1);
-    
-    // Ease out quart function for smooth deceleration
     const easeOut = 1 - Math.pow(1 - progress, 4);
-    
-    window.scrollTo(0, start * (1 - easeOut));
-
-    if (progress < 1) {
-      requestAnimationFrame(animateScroll);
-    }
+    scroller.scrollTop = start * (1 - easeOut);
+    if (progress < 1) requestAnimationFrame(animateScroll);
   };
 
   requestAnimationFrame(animateScroll);
 };
 
-const savedScrollPosition = ref(0);
+// =======================
+// 页面状态恢复 key
+// =======================
+const SCROLL_KEY = 'orders-scroll'
+const PAGE_KEY = 'orders-page'
+let scrollHandler: (() => void) | null = null
+let cachedScroller: HTMLElement | null = null
 
-onActivated(() => {
-  if (savedScrollPosition.value > 0) {
-    window.scrollTo(0, savedScrollPosition.value);
+// =======================
+// 获取滚动容器
+// =======================
+const getScrollerElement = (): HTMLElement => {
+  const layoutMain = document.querySelector('.layout-main') as HTMLElement | null
+  if (layoutMain) return layoutMain
+  const elMain = document.querySelector('.el-main') as HTMLElement | null
+  if (elMain) return elMain
+  return (document.scrollingElement as HTMLElement) ?? document.documentElement ?? document.body
+}
+
+// =======================
+// 恢复页码
+// =======================
+const restorePage = () => {
+  try {
+    const saved = Number(sessionStorage.getItem(PAGE_KEY))
+    if (!Number.isNaN(saved) && saved > 0) {
+      filters.page = saved
+    }
+  } catch {}
+}
+
+// =======================
+// 恢复滚动
+// =======================
+const restoreScroll = () => {
+  try {
+    const saved = Number(sessionStorage.getItem(SCROLL_KEY))
+    if (!Number.isNaN(saved) && saved > 0) {
+      setTimeout(() => {
+        const scroller = getScrollerElement()
+        scroller.scrollTop = saved
+        setTimeout(() => {
+          if (Math.abs(scroller.scrollTop - saved) > 10) {
+            scroller.scrollTop = saved
+          }
+        }, 100)
+      }, 50)
+    }
+  } catch {}
+}
+
+// =======================
+// 实时保存滚动位置（节流）
+// =======================
+let scrollSaveTimer: number | null = null
+const saveScrollPosition = () => {
+  if (scrollSaveTimer) return
+  scrollSaveTimer = window.setTimeout(() => {
+    scrollSaveTimer = null
+    try {
+      const scroller = getScrollerElement()
+      sessionStorage.setItem(SCROLL_KEY, String(scroller.scrollTop))
+    } catch {}
+  }, 100)
+}
+
+// =======================
+// 绑定/解绑滚动监听
+// =======================
+const bindScrollListener = () => {
+  unbindScrollListener()
+  const scroller = getScrollerElement()
+  cachedScroller = scroller
+  scrollHandler = saveScrollPosition
+  scroller.addEventListener('scroll', scrollHandler, { passive: true })
+}
+
+const unbindScrollListener = () => {
+  if (scrollHandler && cachedScroller) {
+    cachedScroller.removeEventListener('scroll', scrollHandler)
   }
-});
+  scrollHandler = null
+  cachedScroller = null
+}
 
+// =======================
+// 首次进入页面
+// =======================
+onMounted(() => {
+  restorePage()
+  restoreScroll()
+  bindScrollListener()
+})
+
+// =======================
+// 从 keep-alive 中激活
+// =======================
+onActivated(() => {
+  restorePage()
+  restoreScroll()
+  bindScrollListener()
+})
+
+// =======================
+// 离开页面（keep-alive 缓存）
+// =======================
 onDeactivated(() => {
-  savedScrollPosition.value = window.scrollY;
-});
+  unbindScrollListener()
+})
+
+// =======================
+// 页码变化实时保存
+// =======================
+watch(() => filters.page, (v) => {
+  sessionStorage.setItem(PAGE_KEY, String(v))
+})
+
+
 
 onBeforeUnmount(() => {
   destroyed.value = true;
+  unbindScrollListener();
+  if (scrollSaveTimer) {
+    clearTimeout(scrollSaveTimer);
+  }
   if (importProgress.timer) {
     clearInterval(importProgress.timer);
   }
