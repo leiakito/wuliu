@@ -29,3 +29,9 @@ const emit = defineEmits<{ (e: 'select', index: string): void }>();
 
 const handleSelect = (index: string) => emit('select', index);
 </script>
+
+<style scoped>
+.el-menu {
+  border-right: none;
+}
+</style>

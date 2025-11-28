@@ -256,13 +256,19 @@
       <p class="muted" style="margin-bottom: 12px">正在上传并解析文件，请稍候…</p>
       <el-progress :percentage="importProgress.percent" :stroke-width="12" status="success" />
     </el-dialog>
+    <div class="float-button-group">
+      <el-button type="primary" circle class="main-float-btn" @click="scrollToTop">
+        <el-icon><ArrowUp /></el-icon>
+      </el-button>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref, watch, onBeforeUnmount, onMounted } from 'vue';
+import { computed, reactive, ref, watch, onBeforeUnmount, onMounted, onActivated, onDeactivated } from 'vue';
 import type { FormInstance, FormRules } from 'element-plus';
 import { ElMessage } from 'element-plus';
+import { Plus, Upload, Download, Refresh, Menu, Close, ArrowUp } from '@element-plus/icons-vue';
 import { fetchOrders, fetchOrdersWithConfig, createOrder, importOrders, updateOrderStatus, searchOrders, fetchCategoryStats, updateOrder } from '@/api/orders';
 import type { OrderCategoryStats, OrderCreateRequest, OrderRecord, OrderUpdateRequest } from '@/types/models';
 import { useAuthStore } from '@/store/auth';
@@ -1146,6 +1152,40 @@ function saveUserOrders() {
   }
 }
 
+const scrollToTop = () => {
+  const duration = 150; // 150ms for even faster scroll
+  const start = window.scrollY;
+  const startTime = performance.now();
+
+  const animateScroll = (currentTime: number) => {
+    const elapsed = currentTime - startTime;
+    const progress = Math.min(elapsed / duration, 1);
+    
+    // Ease out quart function for smooth deceleration
+    const easeOut = 1 - Math.pow(1 - progress, 4);
+    
+    window.scrollTo(0, start * (1 - easeOut));
+
+    if (progress < 1) {
+      requestAnimationFrame(animateScroll);
+    }
+  };
+
+  requestAnimationFrame(animateScroll);
+};
+
+const savedScrollPosition = ref(0);
+
+onActivated(() => {
+  if (savedScrollPosition.value > 0) {
+    window.scrollTo(0, savedScrollPosition.value);
+  }
+});
+
+onDeactivated(() => {
+  savedScrollPosition.value = window.scrollY;
+});
+
 onBeforeUnmount(() => {
   destroyed.value = true;
   if (importProgress.timer) {
@@ -1288,5 +1328,37 @@ onBeforeUnmount(() => {
   color: #f56c6c;
   font-size: 12px;
   font-weight: 600;
+}
+
+.float-button-group {
+  position: fixed;
+  bottom: 40px;
+  right: 20px;
+  z-index: 999;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.sub-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.main-float-btn {
+  width: 40px;
+  height: 40px;
+  font-size: 16px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+
+.float-sub-btn {
+  width: 60px;
+  height: 60px;
+  font-size: 24px;
+  margin-left: 0 !important;
 }
 </style>
