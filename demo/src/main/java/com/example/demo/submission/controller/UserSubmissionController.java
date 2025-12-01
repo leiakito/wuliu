@@ -22,6 +22,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/user-submissions")
@@ -63,5 +64,12 @@ public class UserSubmissionController {
     public ApiResponse<PageResponse<UserSubmission>> all(UserSubmissionQueryRequest request) {
         IPage<UserSubmission> page = userSubmissionService.pageAll(request);
         return ApiResponse.ok(PageResponse.from(page));
+    }
+
+    @GetMapping("/owners")
+    @SaCheckRole("ADMIN")
+    @Operation(summary = "归属用户候选", description = "返回系统账号与历史提交中出现过的归属用户/提交人用户名，去重排序")
+    public ApiResponse<List<String>> owners() {
+        return ApiResponse.ok(userSubmissionService.listOwnerUsernames());
     }
 }

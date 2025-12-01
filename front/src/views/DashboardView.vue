@@ -9,8 +9,8 @@
               <el-icon :size="32"><Document /></el-icon>
             </div>
             <div class="stat-info">
-              <div class="stat-label">总订单数</div>
-              <div class="stat-value">{{ stats.totalOrders }}</div>
+              <div class="stat-label">订单总数</div>
+              <div class="stat-value">{{ stats.orderCount }}</div>
               <div class="stat-trend">
                 <el-icon class="trend-up"><TrendCharts /></el-icon>
                 <span>较上月 +12%</span>
@@ -27,8 +27,8 @@
               <el-icon :size="32"><Checked /></el-icon>
             </div>
             <div class="stat-info">
-              <div class="stat-label">已完成</div>
-              <div class="stat-value">{{ stats.completedOrders }}</div>
+              <div class="stat-label">待结账数</div>
+              <div class="stat-value">{{ stats.waitingSettlementCount }}</div>
               <div class="stat-trend">
                 <el-icon class="trend-up"><TrendCharts /></el-icon>
                 <span>较上月 +8%</span>
@@ -45,8 +45,8 @@
               <el-icon :size="32"><Clock /></el-icon>
             </div>
             <div class="stat-info">
-              <div class="stat-label">处理中</div>
-              <div class="stat-value">{{ stats.pendingOrders }}</div>
+              <div class="stat-label">待结账金额</div>
+              <div class="stat-value">{{ formatCurrency(stats.pendingAmount) }}</div>
               <div class="stat-trend">
                 <el-icon class="trend-down"><TrendCharts /></el-icon>
                 <span>较上月 -5%</span>
@@ -169,6 +169,7 @@ import { computed, nextTick, ref, watch, reactive, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useAuthStore } from '@/store/auth';
 import { searchOrders } from '@/api/orders';
+import { fetchDashboard } from '@/api/report';
 import type { OrderRecord } from '@/types/models';
 import { ElMessage } from 'element-plus';
 import {
@@ -197,10 +198,26 @@ const profileCard = ref();
 const highlightProfile = ref(false);
 
 const stats = reactive({
-  totalOrders: 1250,
-  completedOrders: 980,
-  pendingOrders: 270,
-  totalAmount: '328,450'
+  orderCount: 0,
+  waitingSettlementCount: 0,
+  totalAmount: 0,
+  pendingAmount: 0
+});
+
+const formatNumber = (n: number) => new Intl.NumberFormat('zh-CN').format(n || 0);
+const formatCurrency = (n: number) => `¥${new Intl.NumberFormat('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n || 0)}`;
+
+onMounted(async () => {
+  try {
+    const { data } = await fetchDashboard({});
+    stats.orderCount = data.orderCount ?? 0;
+    stats.waitingSettlementCount = data.waitingSettlementCount ?? 0;
+    stats.totalAmount = Number(data.totalAmount ?? 0);
+    stats.pendingAmount = Number(data.pendingAmount ?? 0);
+  } catch (e) {
+    // 静默失败，保留默认 0
+    console.warn('加载仪表盘统计失败', e);
+  }
 });
 
 const statusDict = [

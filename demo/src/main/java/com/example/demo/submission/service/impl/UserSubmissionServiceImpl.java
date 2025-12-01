@@ -3,6 +3,8 @@ package com.example.demo.submission.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.example.demo.auth.entity.SysUser;
+import com.example.demo.auth.mapper.SysUserMapper;
 import com.example.demo.common.exception.BusinessException;
 import com.example.demo.common.exception.ErrorCode;
 import com.example.demo.order.entity.OrderRecord;
@@ -22,6 +24,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -39,6 +42,7 @@ public class UserSubmissionServiceImpl implements UserSubmissionService {
     private final SettlementService settlementService;
     private final OrderRecordMapper orderRecordMapper;
     private final UserSubmissionLogService userSubmissionLogService;
+    private final SysUserMapper sysUserMapper;
 
     @Override
     @Transactional
@@ -103,6 +107,37 @@ public class UserSubmissionServiceImpl implements UserSubmissionService {
         IPage<UserSubmission> result = userSubmissionMapper.selectPage(page, wrapper);
         attachOrderDetails(result.getRecords());
         return result;
+    }
+
+    @Override
+    public List<String> listOwnerUsernames() {
+        // 1) 系统账号用户名
+        List<SysUser> sysUsers = sysUserMapper.selectList(null);
+        Set<String> set = new TreeSet<>(String::compareToIgnoreCase);
+        for (SysUser u : sysUsers) {
+            if (u != null && StringUtils.hasText(u.getUsername())) {
+                set.add(u.getUsername().trim());
+            }
+        }
+        // 2) 提交中的 ownerUsername
+        LambdaQueryWrapper<UserSubmission> ownerQ = new LambdaQueryWrapper<>();
+        ownerQ.select(UserSubmission::getOwnerUsername);
+        List<UserSubmission> ownerRows = userSubmissionMapper.selectList(ownerQ);
+        for (UserSubmission r : ownerRows) {
+            if (r != null && StringUtils.hasText(r.getOwnerUsername())) {
+                set.add(r.getOwnerUsername().trim());
+            }
+        }
+        // 3) 提交中的 username（提交人）
+        LambdaQueryWrapper<UserSubmission> submitterQ = new LambdaQueryWrapper<>();
+        submitterQ.select(UserSubmission::getUsername);
+        List<UserSubmission> submitterRows = userSubmissionMapper.selectList(submitterQ);
+        for (UserSubmission r : submitterRows) {
+            if (r != null && StringUtils.hasText(r.getUsername())) {
+                set.add(r.getUsername().trim());
+            }
+        }
+        return new ArrayList<>(set);
     }
 
     private void syncSettlement(String trackingNumber) {

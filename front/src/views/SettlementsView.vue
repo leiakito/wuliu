@@ -90,17 +90,21 @@
             end-placeholder="结束"
           />
         </el-form-item>
-        <el-form-item label="归属用户">
+        <el-form-item label="归属用户" v-if="isAdmin">
           <el-select
             v-model="filters.ownerUsername"
             placeholder="全部"
             clearable
             filterable
-            allow-create
-            default-first-option
-            style="width: 160px"
+            style="width: 200px"
+            :loading="userLoading"
           >
-            <el-option v-for="user in submissionUserOptions" :key="user" :label="user" :value="user" />
+            <el-option
+              v-for="user in userOptions"
+              :key="user.username"
+              :label="user.fullName ? `${user.fullName}（${user.username}）` : user.username"
+              :value="user.username"
+            />
           </el-select>
         </el-form-item>
         <!-- <el-form-item label="型号">
@@ -148,12 +152,20 @@
           width="160"
           sortable="custom"
           :sort-orders="['ascending', 'descending']"
-        />
+        >
+          <template #default="{ row }">
+            <span :style="styleFor(row, 'tracking')">{{ row.trackingNumber }}</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="model" label="型号" width="160">
-          <template #default="{ row }">{{ row.model || '-' }}</template>
+          <template #default="{ row }">
+            <span :style="styleFor(row, 'model')">{{ row.model || '-' }}</span>
+          </template>
         </el-table-column>
         <el-table-column prop="orderSn" label="SN" width="180">
-          <template #default="{ row }">{{ row.orderSn || '-' }}</template>
+          <template #default="{ row }">
+            <span :style="styleFor(row, 'sn')">{{ row.orderSn || '-' }}</span>
+          </template>
         </el-table-column>
         <el-table-column
           prop="amount"
@@ -162,7 +174,7 @@
           sortable="custom"
           :sort-orders="['ascending', 'descending']"
         >
-          <template #default="{ row }">￥{{ formatAmount(row.amount) }}</template>
+          <template #default="{ row }"><span :style="styleFor(row, 'amount')">￥{{ formatAmount(row.amount) }}</span></template>
         </el-table-column>
         <el-table-column prop="ownerUsername" label="归属用户" width="140">
           <template #default="{ row }">{{ row.ownerUsername || '-' }}</template>
@@ -181,7 +193,11 @@
           </template>
         </el-table-column>
         <el-table-column prop="payableAt" label="应付日期" width="140" />
-        <el-table-column prop="remark" label="备注" />
+        <el-table-column prop="remark" label="备注">
+          <template #default="{ row }">
+            <span :style="styleFor(row, 'remark')">{{ row.remark || '-' }}</span>
+          </template>
+        </el-table-column>
         <el-table-column label="操作" width="120">
           <template #default="{ row }">
             <el-button
@@ -322,7 +338,7 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, computed, watch, nextTick } from 'vue';
+import { reactive, ref, computed, watch, nextTick, onActivated } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import type { TableInstance } from 'element-plus';
 import {
@@ -336,6 +352,9 @@ import {
   updateSettlementAmount,
   updateSettlementPriceBySn
 } from '@/api/settlements';
+import { listUsers } from '@/api/users';
+import { listOwnerUsernames } from '@/api/submissions';
+import type { SysUser } from '@/types/models';
 import type {
   SettlementRecord,
   SettlementFilterRequest,
@@ -391,6 +410,29 @@ const selectedRecords = ref<SettlementRecord[]>([]);
 
 const submissionUserOptions = ref<string[]>([]);
 const modelOptions = ref<string[]>([]);
+
+// 用户下拉选项（从后端获取完整用户列表，避免被当前结果集限制）
+const userOptions = ref<SysUser[]>([]);
+const userLoading = ref(false);
+const loadUsers = async () => {
+  if (!isAdmin.value) return;
+  userLoading.value = true;
+  try {
+    const [sysUsers, ownerNames] = await Promise.all([
+      listUsers(),
+      listOwnerUsernames({ t: Date.now() }).catch(() => [])
+    ]);
+    const map = new Map<string, SysUser>();
+    sysUsers.forEach(u => { if (u?.username) map.set(u.username, u); });
+    ownerNames.forEach(name => {
+      const key = (name || '').trim();
+      if (key && !map.has(key)) map.set(key, { username: key } as SysUser);
+    });
+    userOptions.value = Array.from(map.values()).sort((a,b) => (a.username || '').localeCompare(b.username || ''));
+  } finally {
+    userLoading.value = false;
+  }
+};
 
 
 const confirmDialog = reactive({
@@ -874,9 +916,47 @@ const formatAmount = (value?: number) => {
   return value.toFixed(2);
 };
 
+// 将订单样式映射到结账行的内联样式
+const styleFor = (row: SettlementRecord, field: 'tracking' | 'model' | 'sn' | 'amount' | 'remark') => {
+  try {
+    const map: any = {
+      tracking: { bg: (row as any).trackingBgColor, fg: (row as any).trackingFontColor, strike: (row as any).trackingStrike },
+      model: { bg: (row as any).modelBgColor, fg: (row as any).modelFontColor, strike: (row as any).modelStrike },
+      sn: { bg: (row as any).snBgColor, fg: (row as any).snFontColor, strike: (row as any).snStrike },
+      amount: { bg: (row as any).amountBgColor, fg: (row as any).amountFontColor, strike: (row as any).amountStrike },
+      remark: { bg: (row as any).remarkBgColor, fg: (row as any).remarkFontColor, strike: (row as any).remarkStrike }
+    }[field];
+
+    if (!map) return {};
+
+    const style: Record<string, string> = {};
+
+    if (map.bg && map.bg !== '#FFFFFF' && map.bg !== '#FFF' && String(map.bg).trim() !== '') {
+      style['background-color'] = map.bg as string;
+    }
+    if (map.fg && map.fg !== '#000000' && map.fg !== '#000' && String(map.fg).trim() !== '') {
+      style['color'] = map.fg as string;
+    }
+    if (map.strike === true || map.strike === 'true' || map.strike === 1) {
+      style['text-decoration'] = 'line-through';
+    }
+
+    return style;
+  } catch (e) {
+    console.warn('样式应用失败:', e);
+    return {};
+  }
+};
+
 const statusLabel = (value?: string) => settlementStatusMap[value ?? ''] || '未知';
 
 // fetchAllSettlements 已移除，改为后端直接过滤返回结果
+
+// 管理员视图：加载用户选项（避免选项被当前结果集限制）
+watch(isAdmin, (v) => { if (v) loadUsers(); }, { immediate: true });
+
+// 每次从 keep-alive 返回本页，强制刷新归属用户下拉，避免浏览器内存缓存
+onActivated(() => { if (isAdmin.value) loadUsers(); });
 
 loadData();
 </script>
@@ -899,5 +979,12 @@ loadData();
 
 .highlight-row {
   background: #f0f9eb !important;
+}
+:deep(.el-table__body) {
+  color: #0a0a0a;
+}
+:deep(.el-table__body td),
+:deep(.el-table__body td .cell) {
+  color: #0a0a0a;
 }
 </style>

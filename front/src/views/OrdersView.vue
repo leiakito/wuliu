@@ -29,11 +29,20 @@
             <el-option v-for="item in statusOptions" :key="item.value" :label="item.label" :value="item.value" />
           </el-select>
         </el-form-item>
+        <el-form-item label="归属用户" v-if="isAdmin">
+          <el-select v-model="filters.ownerUsername" filterable clearable placeholder="全部" style="width: 200px" :loading="userLoading">
+            <el-option
+              v-for="user in userOptions"
+              :key="user.username"
+              :label="user.fullName ? `${user.fullName}（${user.username}）` : user.username"
+              :value="user.username"
+            />
+          </el-select>
+        </el-form-item>
         <el-form-item label="关键字">
             <el-input
             v-model="filters.keyword"
             placeholder="单号/SN/型号"
-            @input="handleKeywordInput"
           />
         </el-form-item>
         <el-form-item>
@@ -82,36 +91,10 @@
           <el-button link type="primary" size="small" @click="clearStatusFilter">清除筛选</el-button>
         </span>
       </div>
+
+
     </div>
 
-    <el-card v-if="isAdmin && diffNotices.length" class="diff-card">
-      <template #header>
-        <div class="settle-bar">
-          <div>
-            <span>变更提醒</span>
-            <small class="muted">导入/新增/编辑后与此前记录不一致的条目</small>
-          </div>
-          <el-button type="text" size="small" @click="exportDiffNotices" :disabled="!diffNotices.length">导出</el-button>
-        </div>
-      </template>
-      <ul class="diff-list">
-        <li v-for="item in diffNotices" :key="item.trackingNumber">
-          <div class="diff-row">
-            <div>
-              <strong>{{ item.trackingNumber }}</strong>：{{ item.message }}
-              <div class="diff-details">
-                <span v-for="(label, idx) in diffFields(item)" :key="idx">
-                  <em>{{ label }}</em>
-                  <span class="diff-before">旧: {{ formatDiffValue(item.before, label) }}</span>
-                  <span class="diff-after">新: {{ formatDiffValue(item.after, label) }}</span>
-                </span>
-              </div>
-            </div>
-            <el-button type="text" size="small" @click="removeDiffNotice(item.trackingNumber)">清除</el-button>
-          </div>
-        </li>
-      </ul>
-    </el-card>
 
     <el-card class="table-card">
       <el-table
@@ -125,16 +108,27 @@
         <el-table-column prop="orderTime" label="时间" width="180">
           <template #default="{ row }">{{ formatDateTime(row.orderTime) }}</template>
         </el-table-column>
-        <el-table-column prop="trackingNumber" label="运单号" width="160" />
-        <el-table-column prop="model" label="型号" />
+        <el-table-column prop="trackingNumber" label="运单号" width="160">
+          <template #default="{ row }">
+            <span :style="styleFor(row, 'tracking')">{{ row.trackingNumber }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="model" label="型号">
+          <template #default="{ row }">
+            <span :style="styleFor(row, 'model')">{{ row.model }}</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="sn" label="SN" width="180">
           <template #default="{ row }">
-            <span class="sn-text">{{ row.sn }}</span>
+            <span class="sn-text" :style="styleFor(row, 'sn')">{{ row.sn }}</span>
           </template>
         </el-table-column>
         <el-table-column prop="amount" label="金额" width="140">
-          <template #default="{ row }">￥{{ formatAmount(row.amount) }}</template>
+          <template #default="{ row }">
+            <span :style="styleFor(row, 'amount')">￥{{ formatAmount(row.amount) }}</span>
+          </template>
         </el-table-column>
+        <el-table-column prop="ownerUsername" label="归属用户" width="120" />
         <el-table-column
           prop="status"
           width="160"
@@ -168,7 +162,11 @@
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="remark" label="备注" />
+        <el-table-column prop="remark" label="备注">
+          <template #default="{ row }">
+            <span :style="styleFor(row, 'remark')">{{ row.remark }}</span>
+          </template>
+        </el-table-column>
         <el-table-column label="创建人" prop="createdBy" width="120" />
         <el-table-column v-if="isAdmin" label="操作" width="120">
           <template #default="{ row }">
@@ -252,6 +250,11 @@
       <p class="muted" style="margin-bottom: 12px">正在上传并解析文件，请稍候…</p>
       <el-progress :percentage="importProgress.percent" :stroke-width="12" status="success" />
     </el-dialog>
+
+
+
+
+
     <div class="float-button-group">
       <el-button type="primary" circle class="main-float-btn" @click="scrollToTop">
         <el-icon><ArrowUp /></el-icon>
@@ -271,15 +274,43 @@ export default {
 import { computed, reactive, ref, watch, onBeforeUnmount, onMounted, onActivated, onDeactivated } from 'vue';
 import type { FormInstance, FormRules } from 'element-plus';
 import { ElMessage } from 'element-plus';
-import { Plus, Upload, Download, Refresh, Menu, Close, ArrowUp } from '@element-plus/icons-vue';
-import { fetchOrders, fetchOrdersWithConfig, createOrder, importOrders, updateOrderStatus, searchOrders, fetchCategoryStats, updateOrder } from '@/api/orders';
-import type { OrderCategoryStats, OrderCreateRequest, OrderRecord, OrderUpdateRequest } from '@/types/models';
+import { ArrowUp } from '@element-plus/icons-vue';
+import { fetchOrders, createOrder, importOrders, updateOrderStatus, searchOrders, fetchCategoryStats, updateOrder } from '@/api/orders';
+import { listUsers } from '@/api/users';
+import { listOwnerUsernames } from '@/api/submissions';
+import type { OrderCategoryStats, OrderCreateRequest, OrderRecord, OrderUpdateRequest, SysUser } from '@/types/models';
+
+type ImportStyle = {
+  trackingNumber?: string;
+  sn?: string;
+  // 运单号列格式
+  trackingBgColor?: string;
+  trackingFontColor?: string;
+  trackingStrike?: boolean;
+  // 型号列格式
+  modelBgColor?: string;
+  modelFontColor?: string;
+  modelStrike?: boolean;
+  // SN列格式
+  snBgColor?: string;
+  snFontColor?: string;
+  snStrike?: boolean;
+  // 金额列格式
+  amountBgColor?: string;
+  amountFontColor?: string;
+  amountStrike?: boolean;
+  // 备注列格式
+  remarkBgColor?: string;
+  remarkFontColor?: string;
+  remarkStrike?: boolean;
+};
 import { useAuthStore } from '@/store/auth';
 
 interface FilterModel {
   dateRange: string[];
   status: string;
   keyword: string;
+  ownerUsername?: string;
   page: number;
   size: number;
   sortBy?: string;
@@ -331,6 +362,7 @@ const filters = reactive<FilterModel>({
   dateRange: [],
   status: '',
   keyword: '',
+  ownerUsername: '',
   page: 1,
   size: getSavedPageSize()
 });
@@ -354,15 +386,22 @@ const orders = ref<OrderRecord[]>([]);
 const userOrders = ref<OrderRecord[]>([]);
 const total = ref(0);
 const loading = ref(false);
-type DiffNotice = {
-  trackingNumber: string;
-  message: string;
-  before?: Partial<OrderRecord>;
-  after?: Partial<OrderRecord>;
-};
-const diffNotices = ref<DiffNotice[]>([]);
-const DIFF_NOTICE_KEY = 'orders-diff-notices';
-const destroyed = ref(false);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 const userSearchInput = ref('');
 const userSearchLoading = ref(false);
 const userSearchDebounce = ref<number | null>(null);
@@ -371,8 +410,50 @@ const tableData = computed(() => (isAdmin.value ? orders.value : userOrders.valu
 const tableLoading = computed(() => (isAdmin.value ? loading.value : userSearchLoading.value));
 const USER_HISTORY_KEY = 'user-order-history';
 const quickStatus = ref('');
+
+// 用户下拉选项（从后端获取）
+const userOptions = ref<SysUser[]>([]);
+const userLoading = ref(false);
+
+const loadUsers = async () => {
+  if (!isAdmin.value) return;
+  userLoading.value = true;
+  try {
+    const [sysUsers, ownerNames] = await Promise.all([
+      listUsers(),
+      listOwnerUsernames().catch(() => [])
+    ]);
+    // 合并：系统账号 + 历史归属用户（去重）
+    const map = new Map<string, SysUser>();
+    sysUsers.forEach(u => {
+      if (u?.username) map.set(u.username, u);
+    });
+    ownerNames.forEach(name => {
+      const key = (name || '').trim();
+      if (key && !map.has(key)) {
+        map.set(key, { username: key } as SysUser);
+      }
+    });
+    userOptions.value = Array.from(map.values()).sort((a,b) => (a.username || '').localeCompare(b.username || ''));
+  } finally {
+    userLoading.value = false;
+  }
+};
 const filteredTableData = computed(() => {
   let list = tableData.value;
+  
+  // 调试：检查是否有重复的 SN
+  if (isAdmin.value && list.length > 0) {
+    const snCounts = new Map<string, number>();
+    list.forEach(order => {
+      const sn = order.sn || '';
+      snCounts.set(sn, (snCounts.get(sn) || 0) + 1);
+    });
+    const duplicates = Array.from(snCounts.entries()).filter(([_, count]) => count > 1);
+    if (duplicates.length > 0) {
+      console.log('🔍 发现重复的 SN:', duplicates);
+    }
+  }
 
   // 快速筛选（仅在非管理员视图使用，管理员视图通过后端筛选）
   if (!isAdmin.value && quickStatus.value) {
@@ -404,40 +485,13 @@ const filteredTableData = computed(() => {
   return list;
 });
 
-const loadPersistedDiffNotices = (): DiffNotice[] => {
-  try {
-    const raw = localStorage.getItem(DIFF_NOTICE_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch (error) {
-    console.warn('Failed to load diff notices', error);
-    return [];
-  }
-};
 
-const persistDiffNotices = (list: DiffNotice[]) => {
-  try {
-    localStorage.setItem(DIFF_NOTICE_KEY, JSON.stringify(list.slice(0, 100)));
-  } catch (error) {
-    console.warn('Failed to persist diff notices', error);
-  }
-};
 
-const mergeDiffNotices = (notices: DiffNotice[]) => {
-  if (!notices.length) return;
-  const merged = [...loadPersistedDiffNotices(), ...notices];
-  persistDiffNotices(merged);
-  if (!destroyed.value) {
-    diffNotices.value = merged;
-  }
-};
+
+
+  
 
 onMounted(() => {
-  destroyed.value = false;
-  const stored = loadPersistedDiffNotices();
-  if (stored.length) {
-    diffNotices.value = stored;
-  }
-
   // 清理 localStorage 中的错误数据
   try {
     const savedSize = localStorage.getItem(PAGE_SIZE_KEY);
@@ -483,6 +537,9 @@ const importProgress = reactive({
   timer: null as number | null
 });
 
+// 导入样式缓存：仅用于本次会话内展示，不入库
+const importStyles = ref<Map<string, ImportStyle>>(new Map());
+
 const editDialog = reactive({
   visible: false,
   loading: false,
@@ -513,7 +570,8 @@ const setStatusFilter = async (value: string) => {
     filters.status = quickStatus.value;
     filters.page = 1;
     console.log('状态筛选变更:', quickStatus.value || '全部');
-    await loadOrders();
+    // 立即执行搜索
+    loadOrders();
   }
 };
 
@@ -523,7 +581,8 @@ const clearStatusFilter = async () => {
   if (isAdmin.value) {
     filters.status = '';
     filters.page = 1;
-    await loadOrders();
+    // 立即执行搜索
+    loadOrders();
   }
 };
 
@@ -540,6 +599,7 @@ const queryParams = computed(() => {
     size: cleanNumber(filters.size, 50),
     keyword: filters.keyword || undefined,
     status: filters.status || undefined,
+    ownerUsername: filters.ownerUsername || undefined,
     sortBy: filters.sortBy || undefined,
     sortOrder: filters.sortOrder || undefined
   };
@@ -572,6 +632,8 @@ const loadOrders = async () => {
     console.log('📡 请求参数:', JSON.stringify(params, null, 2));
     const data = await fetchOrders(params);
     console.log('✅ 收到数据:', data.records.length, '条记录');
+    console.log('📋 详细记录:', data.records.map(r => ({ id: r.id, sn: r.sn, trackingNumber: r.trackingNumber })));
+    // 直接使用后端返回的数据，不做任何去重处理
     orders.value = data.records;
     total.value = data.total;
   } finally {
@@ -580,6 +642,8 @@ const loadOrders = async () => {
 };
 
 const handleSearch = () => {
+  // 统一在点击查询时进行清洗，避免Excel前缀等脏数据
+  filters.keyword = sanitizeSingleInput(filters.keyword);
   filters.page = 1;
   loadOrders();
 };
@@ -648,42 +712,7 @@ const triggerImport = () => {
   fileInput.value?.click();
 };
 
-const fetchAllOrders = async () => {
-  const pageSize = 500;
-  const maxPages = 500; // 最多获取 500 页，防止无限循环
-  let page = 1;
-  const all: OrderRecord[] = [];
 
-  console.log('开始获取所有订单数据用于差异检测...');
-
-  while (page <= maxPages) {
-    try {
-      const data = await fetchOrdersWithConfig({ page, size: pageSize }, { timeout: 60000 });
-      all.push(...data.records);
-
-      if (page % 10 === 0) {
-        console.log(`已获取 ${page} 页，共 ${all.length} 条记录`);
-      }
-
-      // 如果当前页数据少于 pageSize，说明已到最后一页
-      if (data.records.length < pageSize) {
-        console.log(`获取完成，共 ${all.length} 条记录`);
-        break;
-      }
-
-      page += 1;
-    } catch (error) {
-      console.error(`获取第 ${page} 页数据失败:`, error);
-      break;
-    }
-  }
-
-  if (page > maxPages) {
-    console.warn('已达到最大页数限制，可能未获取全部数据');
-  }
-
-  return all;
-};
 
 const captureDiffSnapshot = async () => {
   const all = await fetchAllOrders();
@@ -721,13 +750,33 @@ const handleFileChange = async (event: Event) => {
   const file = target.files?.[0];
   if (!file) return;
   startImportProgress();
-  const prevSnapshot = await captureDiffSnapshot().catch(() => new Map());
   try {
-    const report = await importOrders(file);
+    const report: any = await importOrders(file);
+
+    // 解析样式信息：仅本次会话用于展示（仅传回了发生变化的行）
+    try {
+      const styles: ImportStyle[] = report?.styles || [];
+      const map = new Map<string, ImportStyle>();
+      styles.forEach(s => {
+        // 仅按记录ID缓存样式，避免同一tracking+SN的其他旧记录被新样式“覆盖显示”
+        if ((s as any).id) {
+          map.set(`ID-${(s as any).id}`, s);
+        }
+      });
+      importStyles.value = map;
+    } catch {}
+
     finishImportProgress();
-    ElMessage.success('导入成功');
-    const latest = await fetchAllOrders().catch(() => []);
-    scheduleDiffCalculation(prevSnapshot, latest);
+    const skipped = Number(report?.skippedUnchanged || 0);
+    const imported = Number(report?.importedCount || 0);
+    if (Array.isArray(report?.skippedRows) && report.skippedRows.length) {
+      console.log('本次导入跳过未变化行:', report.skippedRows);
+    }
+    ElMessage.success({
+      message: `导入完成：写入 ${imported} 行，跳过未变化 ${skipped} 行`,
+      duration: 8000, // 显示更久
+      showClose: true
+    });
     loadOrders();
   } catch (error) {
     finishImportProgress();
@@ -811,13 +860,26 @@ const buildOrderSnapshot = (list: OrderRecord[]) => {
       trackingNumber: item.trackingNumber,
       model: item.model,
       sn: item.sn,
-      amount: item.amount
+      amount: item.amount,
+      // 包含样式信息
+      modelBgColor: (item as any).modelBgColor,
+      modelFontColor: (item as any).modelFontColor,
+      modelStrike: (item as any).modelStrike,
+      snBgColor: (item as any).snBgColor,
+      snFontColor: (item as any).snFontColor,
+      snStrike: (item as any).snStrike,
+      amountBgColor: (item as any).amountBgColor,
+      amountFontColor: (item as any).amountFontColor,
+      amountStrike: (item as any).amountStrike,
+      remarkBgColor: (item as any).remarkBgColor,
+      remarkFontColor: (item as any).remarkFontColor,
+      remarkStrike: (item as any).remarkStrike
     });
   });
   return map;
 };
 
-const computeDifferences = (prevMap: Map<string, Partial<OrderRecord>>, nextList: OrderRecord[]) => {
+const computeDifferences = (prevMap: Map<string, Partial<OrderRecord>>, nextList: OrderRecord[], importedStyles?: Map<string, ImportStyle>) => {
   if (!prevMap.size) return [];
   const fieldLabels: Record<string, string> = {
     trackingNumber: '运单号',
@@ -839,6 +901,8 @@ const computeDifferences = (prevMap: Map<string, Partial<OrderRecord>>, nextList
     };
     const before: Partial<OrderRecord> = {};
     const after: Partial<OrderRecord> = {};
+    
+    // 检测内容变化
     Object.keys(fieldLabels).forEach(field => {
       const prevVal = (prev as any)[field];
       const currVal = (order as any)[field];
@@ -848,6 +912,36 @@ const computeDifferences = (prevMap: Map<string, Partial<OrderRecord>>, nextList
         (after as any)[field] = currVal;
       }
     });
+    
+    // 检测样式变化（如果提供了导入的样式）
+    if (importedStyles) {
+      const styleKey = `${(order.trackingNumber || '').toUpperCase()}#${(order.sn || '').toUpperCase()}`;
+      const importedStyle = importedStyles.get(styleKey);
+      if (importedStyle) {
+        const styleFields = ['model', 'sn', 'amount', 'remark'];
+        styleFields.forEach(field => {
+          const bgKey = `${field}BgColor` as keyof ImportStyle;
+          const fgKey = `${field}FontColor` as keyof ImportStyle;
+          const strikeKey = `${field}Strike` as keyof ImportStyle;
+          
+          const prevBg = (prev as any)?.[bgKey];
+          const prevFg = (prev as any)?.[fgKey];
+          const prevStrike = (prev as any)?.[strikeKey];
+          
+          const currBg = importedStyle[bgKey];
+          const currFg = importedStyle[fgKey];
+          const currStrike = importedStyle[strikeKey];
+          
+          if (prevBg !== currBg || prevFg !== currFg || prevStrike !== currStrike) {
+            const fieldLabel = fieldLabels[field] || field;
+            if (!changed.includes(fieldLabel)) {
+              changed.push(`${fieldLabel}(样式)`);
+            }
+          }
+        });
+      }
+    }
+    
     if (changed.length) {
       notices.push({
         trackingNumber: order.trackingNumber ?? key,
@@ -868,15 +962,15 @@ const computeDifferences = (prevMap: Map<string, Partial<OrderRecord>>, nextList
   return Object.values(dedup).slice(0, 20); // 避免一次性展示过多
 };
 
-const removeDiffNotice = (trackingNumber: string) => {
-  diffNotices.value = diffNotices.value.filter(item => item.trackingNumber !== trackingNumber);
-  persistDiffNotices(diffNotices.value);
-};
+
 
 const buildOrderKey = (order: OrderRecord) => {
+  // 使用 追踪号+SN 作为更精细的键，避免同一运单号下多个 SN 被覆盖
+  const tracking = (order.trackingNumber || '').trim().toUpperCase();
+  const sn = (order.sn || '').trim().toUpperCase();
+  if (tracking && sn) return `${tracking}#${sn}`;
   if (order.id) return `ID-${order.id}`;
-  if (!order.trackingNumber) return '';
-  return order.trackingNumber.trim().toUpperCase();
+  return tracking;
 };
 
 const diffFields = (item: DiffNotice) => {
@@ -906,12 +1000,147 @@ const formatDiffValue = (obj: Partial<OrderRecord> | undefined, label: string) =
   return val === undefined || val === null || val === '' ? '-' : val;
 };
 
-const scheduleDiffCalculation = (prevSnapshot: Map<string, Partial<OrderRecord>>, latest: OrderRecord[]) => {
+const scheduleDiffCalculation = (prevSnapshot: Map<string, Partial<OrderRecord>>, latest: OrderRecord[], importedStyles?: Map<string, ImportStyle>) => {
   // 轻量异步排队，避免阻塞后续操作或导航
   setTimeout(() => {
-    const diffs = computeDifferences(prevSnapshot, latest);
+    const diffs = computeDifferences(prevSnapshot, latest, importedStyles);
     mergeDiffNotices(diffs);
   }, 0);
+};
+
+// 将导入报告中的样式直接转为变更项（即使后端未保存该行，也能展示出来）
+const materializeImportedStyleChanges = (
+  prevMap: Map<string, Partial<OrderRecord>>,
+  importedStyles?: Map<string, ImportStyle>
+): StyleChangeItem[] => {
+  if (!importedStyles || !importedStyles.size) return [];
+  const out: StyleChangeItem[] = [];
+  // 包含所有可能有格式的列
+  const fields: Array<'tracking'|'model'|'sn'|'amount'|'remark'> = ['tracking','model','sn','amount','remark'];
+  
+  importedStyles.forEach((s) => {
+    const tracking = (s.trackingNumber || '').toUpperCase();
+    const sn = (s.sn || '').toUpperCase();
+    const key = `${tracking}#${sn}`;
+    const prev = prevMap.get(key) as any;
+
+    fields.forEach((field) => {
+      const bgKey = `${field}BgColor` as keyof ImportStyle;
+      const fgKey = `${field}FontColor` as keyof ImportStyle;
+      const strikeKey = `${field}Strike` as keyof ImportStyle;
+
+      const toBg = (s as any)[bgKey] || '';
+      const toFont = (s as any)[fgKey] || '';
+      const toStrike = !!(s as any)[strikeKey];
+
+      const fromBg = (prev as any)?.[`${field}BgColor`] || '';
+      const fromFont = (prev as any)?.[`${field}FontColor`] || '';
+      const fromStrike = !!((prev as any)?.[`${field}Strike`] || false);
+
+      if (fromBg !== toBg || fromFont !== toFont || fromStrike !== toStrike) {
+        out.push({
+          trackingNumber: s.trackingNumber || '',
+          sn: s.sn || '',
+          field,
+          fromBg: fromBg || undefined,
+          toBg: toBg || undefined,
+          fromFont: fromFont || undefined,
+          toFont: toFont || undefined,
+          fromStrike,
+          toStrike,
+          ts: Date.now()
+        });
+      }
+    });
+  });
+  return out.slice(0, 1000);
+};
+
+// 计算样式变更：前端兜底生成（防止后端只返回部分变更）
+const computeStyleChanges = (
+  prevMap: Map<string, Partial<OrderRecord>>,
+  nextList: OrderRecord[],
+  importedStyles?: Map<string, ImportStyle>
+): StyleChangeItem[] => {
+  if (!nextList?.length) return [];
+  // 包含所有可能有格式的列
+  const fields: Array<'tracking' | 'model' | 'sn' | 'amount' | 'remark'> = ['tracking', 'model', 'sn', 'amount', 'remark'];
+
+  const getStyleFromRow = (row: OrderRecord, field: typeof fields[number]) => {
+    const anyRow: any = row as any;
+    const map: any = {
+      tracking: { bg: anyRow.trackingBgColor, fg: anyRow.trackingFontColor, strike: anyRow.trackingStrike },
+      model: { bg: anyRow.modelBgColor, fg: anyRow.modelFontColor, strike: anyRow.modelStrike },
+      sn: { bg: anyRow.snBgColor, fg: anyRow.snFontColor, strike: anyRow.snStrike },
+      amount: { bg: anyRow.amountBgColor, fg: anyRow.amountFontColor, strike: anyRow.amountStrike },
+      remark: { bg: anyRow.remarkBgColor, fg: anyRow.remarkFontColor, strike: anyRow.remarkStrike }
+    };
+    return map[field] || {};
+  };
+
+  const getStyleFromImported = (row: OrderRecord, field: typeof fields[number]) => {
+    if (!importedStyles) return undefined;
+    const key = `${(row.trackingNumber || '').toUpperCase()}#${(row.sn || '').toUpperCase()}`;
+    const s: any = importedStyles.get(key);
+    if (!s) return undefined;
+    const map: any = {
+      tracking: { bg: s.trackingBgColor, fg: s.trackingFontColor, strike: s.trackingStrike },
+      model: { bg: s.modelBgColor, fg: s.modelFontColor, strike: s.modelStrike },
+      sn: { bg: s.snBgColor, fg: s.snFontColor, strike: s.snStrike },
+      amount: { bg: s.amountBgColor, fg: s.amountFontColor, strike: s.amountStrike },
+      remark: { bg: s.remarkBgColor, fg: s.remarkFontColor, strike: s.remarkStrike }
+    };
+    return map[field];
+  };
+
+  const getPrevStyle = (prev: Partial<OrderRecord> | undefined, field: typeof fields[number]) => {
+    const p: any = prev as any;
+    const map: any = {
+      tracking: { bg: p?.trackingBgColor, fg: p?.trackingFontColor, strike: p?.trackingStrike },
+      model: { bg: p?.modelBgColor, fg: p?.modelFontColor, strike: p?.modelStrike },
+      sn: { bg: p?.snBgColor, fg: p?.snFontColor, strike: p?.snStrike },
+      amount: { bg: p?.amountBgColor, fg: p?.amountFontColor, strike: p?.amountStrike },
+      remark: { bg: p?.remarkBgColor, fg: p?.remarkFontColor, strike: p?.remarkStrike }
+    };
+    return map[field] || {};
+  };
+
+  const result: StyleChangeItem[] = [];
+  nextList.forEach(row => {
+    const key = buildOrderKey(row);
+    const prev = prevMap.get(key);
+
+    fields.forEach(field => {
+      const prevStyle = getPrevStyle(prev, field);
+      // 先取导入样式（优先），没有再取当前行持久化样式
+      const currStyle = getStyleFromImported(row, field) ?? getStyleFromRow(row, field);
+
+      const fromBg = prevStyle?.bg || '';
+      const toBg = currStyle?.bg || '';
+      const fromFont = prevStyle?.fg || '';
+      const toFont = currStyle?.fg || '';
+      const fromStrike = !!prevStyle?.strike;
+      const toStrike = !!currStyle?.strike;
+
+      if (fromBg !== toBg || fromFont !== toFont || fromStrike !== toStrike) {
+        result.push({
+          trackingNumber: row.trackingNumber || '',
+          sn: row.sn || '',
+          field,
+          fromBg: fromBg || undefined,
+          toBg: toBg || undefined,
+          fromFont: fromFont || undefined,
+          toFont: toFont || undefined,
+          fromStrike,
+          toStrike,
+          ts: Date.now()
+        });
+      }
+    });
+  });
+
+  // 合理限制数量，避免 UI 卡顿
+  return result.slice(0, 1000);
 };
 
 const exportDiffNotices = () => {
@@ -970,7 +1199,20 @@ const submitEdit = async () => {
   }
 };
 
-const getRecordKey = (record: OrderRecord) => record.sn || record.trackingNumber || '';
+const getRecordKey = (record: OrderRecord) => {
+  // 优先使用 id（最唯一）
+  if (record.id) {
+    return `ID-${record.id}`;
+  }
+  // 如果没有 id，使用 trackingNumber + SN 组合，确保不同运单号的相同 SN 不会冲突
+  const tracking = (record.trackingNumber || '').trim().toUpperCase();
+  const sn = (record.sn || '').trim().toUpperCase();
+  if (tracking && sn) {
+    return `${tracking}#${sn}`;
+  }
+  // 最后回退到单独字段
+  return sn || tracking || '';
+};
 
 const handleUserSearch = async (silent = false) => {
   const list = userSearchInput.value
@@ -1019,6 +1261,70 @@ const clearUserResults = () => {
   loadCategoryStats();
 };
 
+// 将导入样式映射到行上的内联样式
+const styleFor = (row: OrderRecord, field: 'tracking' | 'model' | 'sn' | 'amount' | 'remark') => {
+  try {
+    // 先按 record.id 精确匹配，避免同一 tracking+SN 的不同记录互相“覆盖样式”
+    let s: any | undefined;
+    if (row.id) {
+      s = importStyles.value.get(`ID-${row.id}`) as any;
+    }
+    // 再回退到 tracking#sn 级别（兼容旧数据/无 id 的情况）
+    if (!s) {
+      const key = `${(row.trackingNumber || '').toUpperCase()}#${(row.sn || '').toUpperCase()}`;
+      s = importStyles.value.get(key) as any;
+    }
+
+    // 1) 优先使用本次导入的样式
+    let map: any | undefined;
+    if (s) {
+      map = {
+        tracking: { bg: s.trackingBgColor, fg: s.trackingFontColor, strike: s.trackingStrike },
+        model: { bg: s.modelBgColor, fg: s.modelFontColor, strike: s.modelStrike },
+        sn: { bg: s.snBgColor, fg: s.snFontColor, strike: s.snStrike },
+        amount: { bg: s.amountBgColor, fg: s.amountFontColor, strike: s.amountStrike },
+        remark: { bg: s.remarkBgColor, fg: s.remarkFontColor, strike: s.remarkStrike }
+      }[field];
+    }
+
+    // 2) 若无，则回退到后端返回的持久化样式字段（针对该条记录的 orderId）
+    if (!map) {
+      const fallback: any = {
+        tracking: { bg: (row as any).trackingBgColor, fg: (row as any).trackingFontColor, strike: (row as any).trackingStrike },
+        model: { bg: (row as any).modelBgColor, fg: (row as any).modelFontColor, strike: (row as any).modelStrike },
+        sn: { bg: (row as any).snBgColor, fg: (row as any).snFontColor, strike: (row as any).snStrike },
+        amount: { bg: (row as any).amountBgColor, fg: (row as any).amountFontColor, strike: (row as any).amountStrike },
+        remark: { bg: (row as any).remarkBgColor, fg: (row as any).remarkFontColor, strike: (row as any).remarkStrike }
+      };
+      map = fallback[field];
+    }
+
+    if (!map) return {};
+
+    const style: Record<string, string> = {};
+
+    // 背景色：非空且不是白色时才应用
+    if (map.bg && map.bg !== '#FFFFFF' && map.bg !== '#FFF' && map.bg.trim() !== '') {
+      style['background-color'] = map.bg as string;
+    }
+
+    // 字体色：非空且不是黑色时才应用
+    if (map.fg && map.fg !== '#000000' && map.fg !== '#000' && map.fg.trim() !== '') {
+      style['color'] = map.fg as string;
+    }
+
+    // 删除线：显式为 true 时才应用
+    if (map.strike === true || map.strike === 'true' || map.strike === 1) {
+      style['text-decoration'] = 'line-through';
+    }
+
+    return style;
+  } catch (error) {
+    console.warn('样式应用失败:', error);
+    return {};
+  }
+};
+
 const exportUserOrders = () => {
   if (!userOrders.value.length) return;
   const headers = ['下单日期', '运单号', '型号', 'SN', '分类', '状态', '备注', '创建人'];
@@ -1046,6 +1352,7 @@ const exportUserOrders = () => {
 
 watch(isAdmin, value => {
   if (value) {
+    loadUsers();
     loadOrders();
   } else {
     loadUserOrders();
@@ -1132,8 +1439,8 @@ watch(() => filters.status, (newValue) => {
   quickStatus.value = newValue;
 });
 
-watch(() => filters.keyword, triggerAdminAutoSearch);
-watch(() => filters.dateRange, triggerAdminAutoSearch, { deep: true });
+// watch(() => filters.keyword, triggerAdminAutoSearch); // 禁用实时搜索，改为手动点击查询
+// watch(() => filters.dateRange, triggerAdminAutoSearch, { deep: true }); // 禁用实时搜索，改为手动点击查询
 
 function loadUserOrders() {
   try {
@@ -1306,7 +1613,6 @@ watch(() => filters.page, (v) => {
 
 
 onBeforeUnmount(() => {
-  destroyed.value = true;
   unbindScrollListener();
   if (scrollSaveTimer) {
     clearTimeout(scrollSaveTimer);
@@ -1318,6 +1624,15 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+:deep(.el-table) {
+  color: #0a0a0a;
+}
+
+:deep(.el-table th),
+:deep(.el-table td) {
+  color: #0a0a0a;
+}
+
 .actions {
   display: flex;
   gap: 12px;
@@ -1483,5 +1798,23 @@ onBeforeUnmount(() => {
   height: 60px;
   font-size: 24px;
   margin-left: 0 !important;
+}
+
+.color-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.color-dot {
+  display: inline-block;
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+}
+
+.arrow {
+  color: #909399;
+  font-size: 12px;
 }
 </style>

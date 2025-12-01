@@ -7,13 +7,16 @@
     USE logistics;
 
     -- 删除旧表（注意依赖顺序）
+    SET FOREIGN_KEY_CHECKS=0;
     DROP TABLE IF EXISTS settlement_record;
+    DROP TABLE IF EXISTS order_cell_style;
     DROP TABLE IF EXISTS user_submission_log;
     DROP TABLE IF EXISTS user_submission;
     DROP TABLE IF EXISTS hardware_price;
     DROP TABLE IF EXISTS order_record;
     DROP TABLE IF EXISTS sys_log;
     DROP TABLE IF EXISTS sys_user;
+    SET FOREIGN_KEY_CHECKS=1;
 
     -- 用户表
     CREATE TABLE sys_user (
@@ -50,9 +53,25 @@
                                   created_at      DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
                                   updated_at      DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                                   deleted         TINYINT         NOT NULL DEFAULT 0,
-                                  UNIQUE KEY uk_order_sn(sn),
+                                  -- 已移除唯一约束 uk_order_tracking_sn，允许重复数据
                                   INDEX idx_order_date(order_date),  -- 索引提高查询速度
-                                  INDEX idx_order_status(status)-- 索引提高查询速度
+                                  INDEX idx_order_status(status),    -- 索引提高查询速度
+                                  INDEX idx_order_sn(sn)             -- SN 查询索引
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+    -- 订单单元格样式表（持久化导入时的B~F列样式）
+    CREATE TABLE IF NOT EXISTS order_cell_style (
+        id           BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        order_id     BIGINT UNSIGNED NOT NULL,
+        field        VARCHAR(16)     NOT NULL, -- tracking|model|sn|amount|remark
+        bg_color     VARCHAR(16),
+        font_color   VARCHAR(16),
+        strike       TINYINT         NOT NULL DEFAULT 0,
+        created_at   DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at   DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_style_order(order_id),
+        UNIQUE KEY uk_style_order_field(order_id, field),
+        CONSTRAINT fk_style_order FOREIGN KEY (order_id) REFERENCES order_record(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
     -- 用户提交单号表
@@ -137,8 +156,8 @@
     -- 初始用户数据（密码: suixiang / operator123，对应 BCrypt 密文）
     INSERT INTO sys_user (username, password, role, status, full_name)
     VALUES
-        ('admin', '$2y$10$/wsz6itJhMn8MvHRVarZFurfAsbIRpVlCnfoLTvx0oCeiyaGEakey', 'ADMIN', 'ENABLED', '系统管理员'),
-        ('operator', '$2y$10$/wsz6itJhMn8MvHRVarZFurfAsbIRpVlCnfoLTvx0oCeiyaGEakey', 'USER', 'ENABLED', '普通用户');
+        ('admin', '$2y$10$/wsz6itJhMn8MvHRVarZFurfAsbIRpVlCnfoLTvx0oCeiyaGEakey', 'ADMIN', 'ENABLED', '系统管理员');
+#         ('operator', '$2y$10$/wsz6itJhMn8MvHRVarZFurfAsbIRpVlCnfoLTvx0oCeiyaGEakey', 'USER', 'ENABLED', '普通用户');
 
     # -- 初始订单样例
     # INSERT INTO order_record (order_date, order_time, tracking_number, model, sn, remark, category, status, amount, currency, weight, customer_name, created_by, imported)

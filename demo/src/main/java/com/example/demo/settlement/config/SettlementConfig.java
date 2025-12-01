@@ -3,6 +3,7 @@ package com.example.demo.settlement.config;
 import com.example.demo.config.AppProperties;
 import com.example.demo.hardware.mapper.HardwarePriceMapper;
 import com.example.demo.order.mapper.OrderRecordMapper;
+import com.example.demo.order.mapper.OrderCellStyleMapper;
 import com.example.demo.settlement.mapper.SettlementRecordMapper;
 import com.example.demo.settlement.service.SettlementCacheService;
 import com.example.demo.settlement.service.SettlementService;
@@ -22,14 +23,16 @@ public class SettlementConfig {
                                                HardwarePriceMapper hardwarePriceMapper,
                                                UserSubmissionMapper userSubmissionMapper,
                                                AppProperties appProperties,
-                                               SettlementCacheService settlementCacheService) {
+                                               SettlementCacheService settlementCacheService,
+                                               OrderCellStyleMapper orderCellStyleMapper) {
         return new SettlementServiceImpl(
             settlementRecordMapper,
             orderRecordMapper,
             hardwarePriceMapper,
             userSubmissionMapper,
             appProperties,
-            settlementCacheService
+            settlementCacheService,
+            orderCellStyleMapper
         );
     }
 }

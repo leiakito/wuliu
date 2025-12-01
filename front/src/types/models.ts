@@ -35,6 +35,34 @@ export interface OrderRecord {
   createdAt?: string;
   updatedAt?: string;
   inCurrentSettlement?: boolean;
+  
+  // 单元格格式字段 - 运单号列
+  trackingBgColor?: string;
+  trackingFontColor?: string;
+  trackingStrike?: boolean;
+  
+  // 单元格格式字段 - 型号列
+  modelBgColor?: string;
+  modelFontColor?: string;
+  modelStrike?: boolean;
+  
+  // 单元格格式字段 - SN列
+  snBgColor?: string;
+  snFontColor?: string;
+  snStrike?: boolean;
+  
+  // 单元格格式字段 - 金额列
+  amountBgColor?: string;
+  amountFontColor?: string;
+  amountStrike?: boolean;
+  
+  // 单元格格式字段 - 备注列
+  remarkBgColor?: string;
+  remarkFontColor?: string;
+  remarkStrike?: boolean;
+  
+  // Excel 行号（用于位置对齐）
+  excelRowIndex?: number;
 }
 
 export interface HardwarePrice {
@@ -120,6 +148,27 @@ export interface SettlementRecord {
   orderTime?: string;
   orderStatus?: string;
   orderAmount?: number;
+
+  // 单元格格式字段 - 运单号列（继承自订单样式，仅用于展示）
+  trackingBgColor?: string;
+  trackingFontColor?: string;
+  trackingStrike?: boolean;
+  // 单元格格式字段 - 型号列
+  modelBgColor?: string;
+  modelFontColor?: string;
+  modelStrike?: boolean;
+  // 单元格格式字段 - SN 列
+  snBgColor?: string;
+  snFontColor?: string;
+  snStrike?: boolean;
+  // 单元格格式字段 - 金额列
+  amountBgColor?: string;
+  amountFontColor?: string;
+  amountStrike?: boolean;
+  // 单元格格式字段 - 备注列
+  remarkBgColor?: string;
+  remarkFontColor?: string;
+  remarkStrike?: boolean;
 }
 
 export interface OrderCategoryStats {

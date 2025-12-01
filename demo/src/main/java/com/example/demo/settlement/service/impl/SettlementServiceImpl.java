@@ -13,6 +13,8 @@ import com.example.demo.hardware.entity.HardwarePrice;
 import com.example.demo.hardware.mapper.HardwarePriceMapper;
 import com.example.demo.order.entity.OrderRecord;
 import com.example.demo.order.mapper.OrderRecordMapper;
+import com.example.demo.order.entity.OrderCellStyle;
+import com.example.demo.order.mapper.OrderCellStyleMapper;
 import com.example.demo.submission.entity.UserSubmission;
 import com.example.demo.submission.mapper.UserSubmissionMapper;
 import com.example.demo.settlement.dto.SettlementAmountRequest;
@@ -52,6 +54,7 @@ public class SettlementServiceImpl implements SettlementService {
     private final UserSubmissionMapper userSubmissionMapper;
     private final AppProperties appProperties;
     private final SettlementCacheService cacheService;
+    private final OrderCellStyleMapper orderCellStyleMapper;
 
     @Override
     @Transactional
@@ -577,6 +580,45 @@ public class SettlementServiceImpl implements SettlementService {
             ).in(OrderRecord::getId, orderIds);
             List<OrderRecord> orders = orderRecordMapper.selectList(orderWrapper);
             orderMap = orders.stream().collect(Collectors.toMap(OrderRecord::getId, o -> o));
+
+            // 读取订单样式并映射到结算记录
+            if (!orderIds.isEmpty()) {
+                LambdaQueryWrapper<OrderCellStyle> styleWrapper = new LambdaQueryWrapper<>();
+                styleWrapper.in(OrderCellStyle::getOrderId, orderIds);
+                List<OrderCellStyle> styles = orderCellStyleMapper.selectList(styleWrapper);
+                Map<Long, List<OrderCellStyle>> stylesByOrder = styles.stream()
+                    .collect(Collectors.groupingBy(OrderCellStyle::getOrderId));
+                // 将样式写入 SettlementRecord 的 transient 字段
+                records.forEach(r -> {
+                    Long oid = r.getOrderId();
+                    if (oid == null) return;
+                    List<OrderCellStyle> list = stylesByOrder.getOrDefault(oid, Collections.emptyList());
+                    for (OrderCellStyle s : list) {
+                        String field = s.getField();
+                        if ("tracking".equals(field)) {
+                            r.setTrackingBgColor(s.getBgColor());
+                            r.setTrackingFontColor(s.getFontColor());
+                            r.setTrackingStrike(Boolean.TRUE.equals(s.getStrike()));
+                        } else if ("model".equals(field)) {
+                            r.setModelBgColor(s.getBgColor());
+                            r.setModelFontColor(s.getFontColor());
+                            r.setModelStrike(Boolean.TRUE.equals(s.getStrike()));
+                        } else if ("sn".equals(field)) {
+                            r.setSnBgColor(s.getBgColor());
+                            r.setSnFontColor(s.getFontColor());
+                            r.setSnStrike(Boolean.TRUE.equals(s.getStrike()));
+                        } else if ("amount".equals(field)) {
+                            r.setAmountBgColor(s.getBgColor());
+                            r.setAmountFontColor(s.getFontColor());
+                            r.setAmountStrike(Boolean.TRUE.equals(s.getStrike()));
+                        } else if ("remark".equals(field)) {
+                            r.setRemarkBgColor(s.getBgColor());
+                            r.setRemarkFontColor(s.getFontColor());
+                            r.setRemarkStrike(Boolean.TRUE.equals(s.getStrike()));
+                        }
+                    }
+                });
+            }
         } else {
             orderMap = Collections.emptyMap();
         }

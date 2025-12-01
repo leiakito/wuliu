@@ -38,4 +38,46 @@ public class OrderRecord {
 
     @TableField(exist = false)
     private boolean inCurrentSettlement;
+
+    @TableField(exist = false)
+    private String ownerUsername;
+
+    // ===== Excel 导入样式（不入库，仅用于前端展示） =====
+    @TableField(exist = false)
+    private String modelBgColor;
+    @TableField(exist = false)
+    private String modelFontColor;
+    @TableField(exist = false)
+    private Boolean modelStrike;
+
+    @TableField(exist = false)
+    private String snBgColor;
+    @TableField(exist = false)
+    private String snFontColor;
+    @TableField(exist = false)
+    private Boolean snStrike;
+
+    @TableField(exist = false)
+    private String amountBgColor;
+    @TableField(exist = false)
+    private String amountFontColor;
+    @TableField(exist = false)
+    private Boolean amountStrike;
+
+    @TableField(exist = false)
+    private String remarkBgColor;
+    @TableField(exist = false)
+    private String remarkFontColor;
+    @TableField(exist = false)
+    private Boolean remarkStrike;
+
+    @TableField(exist = false)
+    private Integer excelRowIndex;
+    
+    @TableField(exist = false)
+    private String trackingBgColor;
+    @TableField(exist = false)
+    private String trackingFontColor;
+    @TableField(exist = false)
+    private Boolean trackingStrike;
 }

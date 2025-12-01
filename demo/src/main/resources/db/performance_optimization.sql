@@ -1,173 +1,146 @@
-# -- 性能优化索引 8.0
-# -- 执行此脚本以添加必要的索引，显著提升查询速度
-#
-# USE logistics;
-#
-# -- 1. order_record 表优化
-# -- SN 查询索引（已有唯一索引 uk_order_sn，无需额外添加）
-# -- tracking_number 索引（用于关联查询）
-# CREATE INDEX IF NOT EXISTS idx_order_tracking ON order_record(tracking_number);
-#
-# -- SN 大小写不敏感查询优化（函数索引，MySQL 8.0+）
-# -- 用于加速 UPPER(sn) = 'XXX' 查询
-# CREATE INDEX IF NOT EXISTS idx_order_sn_upper ON order_record((UPPER(sn)));
-#
-# -- 2. settlement_record 表优化 - 基础索引
-# -- order_id 索引（关键！用于 SN 查询时的 orderId 匹配）
-# CREATE INDEX IF NOT EXISTS idx_settlement_order_id ON settlement_record(order_id);
-#
-# -- tracking_number 索引（用于运单号查询）
-# CREATE INDEX IF NOT EXISTS idx_settlement_tracking ON settlement_record(tracking_number);
-#
-# -- order_time 索引（用于排序）
-# CREATE INDEX IF NOT EXISTS idx_settlement_order_time ON settlement_record(order_time);
-#
-# -- owner_username 索引（用于按归属用户过滤）
-# CREATE INDEX IF NOT EXISTS idx_settlement_owner ON settlement_record(owner_username);
-#
-# -- 3. settlement_record 表优化 - 复合索引
-# -- status + order_time 复合索引（用于按状态过滤并排序）
-# CREATE INDEX IF NOT EXISTS idx_settlement_status_time ON settlement_record(status, order_time);
-#
-# -- status + owner_username 复合索引（常见组合查询）
-# CREATE INDEX IF NOT EXISTS idx_settlement_status_owner ON settlement_record(status, owner_username);
-#
-# -- tracking_number + model 复合索引（优化关键字查询）
-# CREATE INDEX IF NOT EXISTS idx_settlement_tracking_model ON settlement_record(tracking_number, model);
-#
-# -- payable_at + status 复合索引（优化日期+状态组合查询）
-# CREATE INDEX IF NOT EXISTS idx_settlement_payable_status ON settlement_record(payable_at, status);
-#
-# -- settle_batch + status 复合索引（优化批次查询）
-# CREATE INDEX IF NOT EXISTS idx_settlement_batch_status ON settlement_record(settle_batch, status);
-#
-# -- id + created_at 复合索引（优化游标分页）
-# CREATE INDEX IF NOT EXISTS idx_settlement_id_created ON settlement_record(id, created_at);
-#
-# -- 4. 查看索引创建结果
-# SHOW INDEX FROM order_record;
-# SHOW INDEX FROM settlement_record;
-#
-# -- 5. 分析表统计信息（优化查询计划）
-# ANALYZE TABLE order_record;
-# ANALYZE TABLE settlement_record;
-
--- 6. 验证索引使用情况
--- 可以使用以下查询测试索引是否生效
--- EXPLAIN SELECT * FROM settlement_record WHERE order_id IN (SELECT id FROM order_record WHERE UPPER(sn) = 'TEST');
--- EXPLAIN SELECT * FROM settlement_record WHERE status = 'PENDING' ORDER BY order_time DESC LIMIT 20;
--- EXPLAIN SELECT * FROM settlement_record WHERE status = 'PENDING' AND owner_username = 'user1' LIMIT 20;
-
-#
-# #5.0
-# USE logistics;
-#
-# -- 1. order_record 表优化
-# -- SN 查询索引（已有唯一索引 uk_order_sn，无需额外添加）
-# -- tracking_number 索引（用于关联查询）
-# -- 如果索引已存在会报错，请忽略或先删除旧索引
-# CREATE INDEX idx_order_tracking ON order_record(tracking_number);
-#
-# -- SN 大小写不敏感查询优化（函数索引，注意版本）
-# -- 【注意】：仅 MySQL 8.0.13+ 支持下面这行语法。
-# -- 如果你是 MySQL 5.7，请删除下面这行，或者使用虚拟列(Generated Columns)来实现。
-# CREATE INDEX idx_order_sn_upper ON order_record((UPPER(sn)));
-#
-# -- 2. settlement_record 表优化 - 基础索引
-# -- order_id 索引（关键！用于 SN 查询时的 orderId 匹配）
-# CREATE INDEX idx_settlement_order_id ON settlement_record(order_id);
-#
-# -- tracking_number 索引（用于运单号查询）
-# CREATE INDEX idx_settlement_tracking ON settlement_record(tracking_number);
-#
-# -- order_time 索引（用于排序）
-# CREATE INDEX idx_settlement_order_time ON settlement_record(order_time);
-#
-# -- owner_username 索引（用于按归属用户过滤）
-# CREATE INDEX idx_settlement_owner ON settlement_record(owner_username);
-#
-# -- 3. settlement_record 表优化 - 复合索引
-# -- status + order_time 复合索引（用于按状态过滤并排序）
-# CREATE INDEX idx_settlement_status_time ON settlement_record(status, order_time);
-#
-# -- status + owner_username 复合索引（常见组合查询）
-# CREATE INDEX idx_settlement_status_owner ON settlement_record(status, owner_username);
-#
-# -- tracking_number + model 复合索引（优化关键字查询）
-# CREATE INDEX idx_settlement_tracking_model ON settlement_record(tracking_number, model);
-#
-# -- payable_at + status 复合索引（优化日期+状态组合查询）
-# CREATE INDEX idx_settlement_payable_status ON settlement_record(payable_at, status);
-#
-# -- settle_batch + status 复合索引（优化批次查询）
-# CREATE INDEX idx_settlement_batch_status ON settlement_record(settle_batch, status);
-#
-# -- id + created_at 复合索引（优化游标分页）
-# CREATE INDEX idx_settlement_id_created ON settlement_record(id, created_at);
-#
-# -- 4. 查看索引创建结果
-# SHOW INDEX FROM order_record;
-# SHOW INDEX FROM settlement_record;
-#
-# -- 5. 分析表统计信息（优化查询计划）
-# ANALYZE TABLE order_record;
-# ANALYZE TABLE settlement_record;
-#
-# -- 6. 验证索引使用情况
-# -- EXPLAIN SELECT * FROM settlement_record WHERE order_id IN (SELECT id FROM order_record WHERE UPPER(sn) = 'TEST');
+-- 性能优化与幂等迁移脚本（可多次执行安全）
+-- 适用 MySQL 8.0+（函数索引/IF/动态SQL 使用到 8.0 特性）
 
 USE logistics;
 
--- 1. order_record 表优化
--- SN 查询索引（已有唯一索引 uk_order_sn，无需额外添加）
--- tracking_number 索引（用于关联查询）
--- 如果索引已存在会报错，请忽略或先删除旧索引
-CREATE INDEX idx_order_tracking ON order_record(tracking_number);
+-- =============================
+-- A. 架构迁移：允许重复数据，移除唯一约束
+-- 删除所有唯一约束，允许相同 tracking_number + sn 组合的重复记录
+-- 同时补充 sn 普通索引，方便按 SN 查询
+-- =============================
 
--- SN 大小写不敏感查询优化（函数索引，注意版本）
--- 【注意】：仅 MySQL 8.0.13+ 支持下面这行语法。
--- 如果你是 MySQL 5.7，请删除下面这行，或者使用虚拟列(Generated Columns)来实现。
-CREATE INDEX idx_order_sn_upper ON order_record((UPPER(sn)));
+-- 0) 安全删除旧唯一键 uk_order_sn（若存在则删除；MySQL 不支持 DROP INDEX IF EXISTS，改用信息_schema判断）
+SET @exists := (
+  SELECT COUNT(*) FROM information_schema.statistics
+  WHERE table_schema = DATABASE()
+    AND table_name = 'order_record'
+    AND index_name = 'uk_order_sn'
+);
+SET @sql := IF(@exists > 0,
+  'ALTER TABLE order_record DROP INDEX uk_order_sn',
+  'DO 0'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
--- 2. settlement_record 表优化 - 基础索引
--- order_id 索引（关键！用于 SN 查询时的 orderId 匹配）
-CREATE INDEX idx_settlement_order_id ON settlement_record(order_id);
+-- 1) 删除复合唯一键 uk_order_tracking_sn（若存在则删除，允许重复数据）
+SET @exists := (
+  SELECT COUNT(*) FROM information_schema.statistics
+  WHERE table_schema = DATABASE()
+    AND table_name = 'order_record'
+    AND index_name = 'uk_order_tracking_sn'
+);
+SET @sql := IF(@exists > 0,
+  'ALTER TABLE order_record DROP INDEX uk_order_tracking_sn',
+  'DO 0'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
--- tracking_number 索引（用于运单号查询）
-CREATE INDEX idx_settlement_tracking ON settlement_record(tracking_number);
+-- 2) SN 普通索引（仅当不存在时创建）
+SET @exists := (
+  SELECT COUNT(*) FROM information_schema.statistics
+  WHERE table_schema = DATABASE()
+    AND table_name = 'order_record'
+    AND index_name = 'idx_order_sn'
+);
+SET @sql := IF(@exists = 0,
+  'CREATE INDEX idx_order_sn ON order_record(sn)',
+  'DO 0'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
--- order_time 索引（用于排序）
-CREATE INDEX idx_settlement_order_time ON settlement_record(order_time);
+-- 3) tracking_number 索引（仅当不存在时创建）
+SET @exists := (
+  SELECT COUNT(*) FROM information_schema.statistics
+  WHERE table_schema = DATABASE()
+    AND table_name = 'order_record'
+    AND index_name = 'idx_order_tracking'
+);
+SET @sql := IF(@exists = 0,
+  'CREATE INDEX idx_order_tracking ON order_record(tracking_number)',
+  'DO 0'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
--- owner_username 索引（用于按归属用户过滤）
-CREATE INDEX idx_settlement_owner ON settlement_record(owner_username);
+-- 4) UPPER(sn) 函数索引（仅当不存在时创建）
+-- 注意：仅 MySQL 8.0.13+ 支持函数索引，不支持可忽略失败或删除本段
+SET @exists := (
+  SELECT COUNT(*) FROM information_schema.statistics
+  WHERE table_schema = DATABASE()
+    AND table_name = 'order_record'
+    AND index_name = 'idx_order_sn_upper'
+);
+SET @sql := IF(@exists = 0,
+  'CREATE INDEX idx_order_sn_upper ON order_record((UPPER(sn)))',
+  'DO 0'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
--- 3. settlement_record 表优化 - 复合索引
--- status + order_time 复合索引（用于按状态过滤并排序）
-CREATE INDEX idx_settlement_status_time ON settlement_record(status, order_time);
+-- =============================
+-- B. settlement_record 索引（幂等创建）
+-- =============================
 
--- status + owner_username 复合索引（常见组合查询）
-CREATE INDEX idx_settlement_status_owner ON settlement_record(status, owner_username);
+-- 通用过程：检查后再创建（避免重复）
+SET @tbl := 'settlement_record';
 
--- tracking_number + model 复合索引（优化关键字查询）
-CREATE INDEX idx_settlement_tracking_model ON settlement_record(tracking_number, model);
+-- 基础索引
+SET @idx := 'idx_settlement_order_id';
+SET @exists := (SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = @tbl AND index_name = @idx);
+SET @sql := IF(@exists = 0, CONCAT('CREATE INDEX ', @idx, ' ON ', @tbl, '(order_id)'), 'DO 0');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
--- payable_at + status 复合索引（优化日期+状态组合查询）
-CREATE INDEX idx_settlement_payable_status ON settlement_record(payable_at, status);
+SET @idx := 'idx_settlement_tracking';
+SET @exists := (SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = @tbl AND index_name = @idx);
+SET @sql := IF(@exists = 0, CONCAT('CREATE INDEX ', @idx, ' ON ', @tbl, '(tracking_number)'), 'DO 0');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
--- settle_batch + status 复合索引（优化批次查询）
-CREATE INDEX idx_settlement_batch_status ON settlement_record(settle_batch, status);
+SET @idx := 'idx_settlement_order_time';
+SET @exists := (SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = @tbl AND index_name = @idx);
+SET @sql := IF(@exists = 0, CONCAT('CREATE INDEX ', @idx, ' ON ', @tbl, '(order_time)'), 'DO 0');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
--- id + created_at 复合索引（优化游标分页）
-CREATE INDEX idx_settlement_id_created ON settlement_record(id, created_at);
+SET @idx := 'idx_settlement_owner';
+SET @exists := (SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = @tbl AND index_name = @idx);
+SET @sql := IF(@exists = 0, CONCAT('CREATE INDEX ', @idx, ' ON ', @tbl, '(owner_username)'), 'DO 0');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
--- 4. 查看索引创建结果
-SHOW INDEX FROM order_record;
-SHOW INDEX FROM settlement_record;
+-- 复合索引
+SET @idx := 'idx_settlement_status_time';
+SET @exists := (SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = @tbl AND index_name = @idx);
+SET @sql := IF(@exists = 0, CONCAT('CREATE INDEX ', @idx, ' ON ', @tbl, '(status, order_time)'), 'DO 0');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
--- 5. 分析表统计信息（优化查询计划）
+SET @idx := 'idx_settlement_status_owner';
+SET @exists := (SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = @tbl AND index_name = @idx);
+SET @sql := IF(@exists = 0, CONCAT('CREATE INDEX ', @idx, ' ON ', @tbl, '(status, owner_username)'), 'DO 0');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @idx := 'idx_settlement_tracking_model';
+SET @exists := (SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = @tbl AND index_name = @idx);
+SET @sql := IF(@exists = 0, CONCAT('CREATE INDEX ', @idx, ' ON ', @tbl, '(tracking_number, model)'), 'DO 0');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @idx := 'idx_settlement_payable_status';
+SET @exists := (SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = @tbl AND index_name = @idx);
+SET @sql := IF(@exists = 0, CONCAT('CREATE INDEX ', @idx, ' ON ', @tbl, '(payable_at, status)'), 'DO 0');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @idx := 'idx_settlement_batch_status';
+SET @exists := (SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = @tbl AND index_name = @idx);
+SET @sql := IF(@exists = 0, CONCAT('CREATE INDEX ', @idx, ' ON ', @tbl, '(settle_batch, status)'), 'DO 0');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @idx := 'idx_settlement_id_created';
+SET @exists := (SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = @tbl AND index_name = @idx);
+SET @sql := IF(@exists = 0, CONCAT('CREATE INDEX ', @idx, ' ON ', @tbl, '(id, created_at)'), 'DO 0');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+-- =============================
+-- C. 刷新统计信息（可选）
+-- =============================
 ANALYZE TABLE order_record;
 ANALYZE TABLE settlement_record;
 
--- 6. 验证索引使用情况
+-- 验证（按需执行）
 -- EXPLAIN SELECT * FROM settlement_record WHERE order_id IN (SELECT id FROM order_record WHERE UPPER(sn) = 'TEST');
+-- EXPLAIN SELECT * FROM settlement_record WHERE status = 'PENDING' ORDER BY order_time DESC LIMIT 20;
+-- EXPLAIN SELECT * FROM settlement_record WHERE status = 'PENDING' AND owner_username = 'user1' LIMIT 20;

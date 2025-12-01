@@ -11,6 +11,7 @@ public class OrderFilterRequest {
     private String category;
     private String status;
     private String keyword;
+    private String ownerUsername; // 新增：归属用户筛选
     private long page = 1;
     private long size = 20;
     private String sortBy;      // 排序字段，如 status, orderDate 等

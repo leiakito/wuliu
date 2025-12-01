@@ -26,7 +26,40 @@ export const createOrder = (payload: OrderCreateRequest) =>
 export const importOrders = (file: File) => {
   const formData = new FormData();
   formData.append('file', file);
-  return apiClient.post<{ duplicateSn?: string[]; duplicateSnDetail?: Record<string, string[]> }>('/orders/import', formData, {
+  return apiClient.post<{
+    duplicateSn?: string[];
+    duplicateSnDetail?: Record<string, string[]>;
+    styles?: Array<{
+      trackingNumber?: string;
+      sn?: string;
+      trackingBgColor?: string;
+      trackingFontColor?: string;
+      trackingStrike?: boolean;
+      modelBgColor?: string;
+      modelFontColor?: string;
+      modelStrike?: boolean;
+      snBgColor?: string;
+      snFontColor?: string;
+      snStrike?: boolean;
+      amountBgColor?: string;
+      amountFontColor?: string;
+      amountStrike?: boolean;
+      remarkBgColor?: string;
+      remarkFontColor?: string;
+      remarkStrike?: boolean;
+    }>;
+    styleChanges?: Array<{
+      trackingNumber?: string;
+      sn?: string;
+      field: string;
+      fromBg?: string;
+      toBg?: string;
+      fromFont?: string;
+      toFont?: string;
+      fromStrike?: boolean;
+      toStrike?: boolean;
+    }>;
+  }>('/orders/import', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
     timeout: 300000
   });
