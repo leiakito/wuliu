@@ -107,7 +107,7 @@
                                     id           BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
                                     price_date   DATE            NOT NULL,
                                     item_name    VARCHAR(128)    NOT NULL,
-                                    price        DECIMAL(15,2)   NOT NULL,
+                                    price        DECIMAL(15,2)   NULL,
                                     created_by   VARCHAR(64),
                                     created_at   DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
                                     updated_at   DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,

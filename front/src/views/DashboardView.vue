@@ -64,7 +64,7 @@
             </div>
             <div class="stat-info">
               <div class="stat-label">总金额</div>
-              <div class="stat-value">¥{{ stats.totalAmount }}</div>
+              <div class="stat-value">{{ formatCurrency(stats.totalAmount) }}</div>
               <div class="stat-trend">
                 <el-icon class="trend-up"><TrendCharts /></el-icon>
                 <span>较上月 +15%</span>
@@ -145,11 +145,28 @@
         <el-table-column prop="orderTime" label="时间" width="180">
           <template #default="{ row }">{{ formatDateTime(row.orderTime) }}</template>
         </el-table-column>
-        <el-table-column prop="trackingNumber" label="运单号" width="200" />
-        <el-table-column prop="model" label="型号" />
+        <el-table-column prop="trackingNumber" label="运单号" width="200">
+          <template #default="{ row }">
+            <span :style="styleFor(row, 'tracking')">{{ row.trackingNumber }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="model" label="型号">
+          <template #default="{ row }">
+            <span :style="styleFor(row, 'model')">{{ row.model || '-' }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="sn" label="SN" width="200">
+          <template #default="{ row }">
+            <span :style="styleFor(row, 'sn')">{{ row.sn || '-' }}</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="category" label="分类" width="120" />
         <el-table-column prop="amount" label="金额" width="120">
-          <template #default="{ row }">{{ row.amount ?? '-' }} {{ row.currency }}</template>
+          <template #default="{ row }">
+            <span :style="styleFor(row, 'amount')">
+              <template v-if="row.amount !== null && row.amount !== undefined">￥{{ formatCurrency(row.amount, false) }}</template>
+            </span>
+          </template>
         </el-table-column>
         <el-table-column prop="status" label="状态" width="140">
           <template #default="{ row }">
@@ -158,7 +175,11 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="remark" label="备注" />
+        <el-table-column prop="remark" label="备注">
+          <template #default="{ row }">
+            <span :style="styleFor(row, 'remark')">{{ row.remark || '-' }}</span>
+          </template>
+        </el-table-column>
       </el-table>
     </el-card>
   </div>
@@ -205,7 +226,10 @@ const stats = reactive({
 });
 
 const formatNumber = (n: number) => new Intl.NumberFormat('zh-CN').format(n || 0);
-const formatCurrency = (n: number) => `¥${new Intl.NumberFormat('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n || 0)}`;
+const formatCurrency = (n: number, withSymbol = true) => {
+  const formatted = new Intl.NumberFormat('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n || 0);
+  return withSymbol ? `¥${formatted}` : formatted;
+};
 
 onMounted(async () => {
   try {
@@ -229,6 +253,38 @@ const statusDict = [
 const statusText = (value?: string) => statusDict.find(item => item.value === value)?.label ?? '未知';
 const statusTag = (value?: string) => statusDict.find(item => item.value === value)?.tag ?? 'info';
 const formatDateTime = (value?: string) => (value ? value.replace('T', ' ').replace('Z', '') : '-');
+
+const styleFor = (row: OrderRecord, field: 'tracking' | 'model' | 'sn' | 'amount' | 'remark') => {
+  try {
+    const map: any = {
+      tracking: { bg: (row as any).trackingBgColor, fg: (row as any).trackingFontColor, strike: (row as any).trackingStrike },
+      model: { bg: (row as any).modelBgColor, fg: (row as any).modelFontColor, strike: (row as any).modelStrike },
+      sn: { bg: (row as any).snBgColor, fg: (row as any).snFontColor, strike: (row as any).snStrike },
+      amount: { bg: (row as any).amountBgColor, fg: (row as any).amountFontColor, strike: (row as any).amountStrike },
+      remark: { bg: (row as any).remarkBgColor, fg: (row as any).remarkFontColor, strike: (row as any).remarkStrike }
+    };
+
+    const styleInfo = map[field];
+    if (!styleInfo) return {};
+
+    const style: Record<string, string> = {};
+
+    if (styleInfo.bg && styleInfo.bg !== '#FFFFFF' && styleInfo.bg !== '#FFF' && String(styleInfo.bg).trim() !== '') {
+      style['background-color'] = styleInfo.bg as string;
+    }
+    if (styleInfo.fg && styleInfo.fg !== '#000000' && styleInfo.fg !== '#000' && String(styleInfo.fg).trim() !== '') {
+      style['color'] = styleInfo.fg as string;
+    }
+    if (styleInfo.strike === true || styleInfo.strike === 'true' || styleInfo.strike === 1) {
+      style['text-decoration'] = 'line-through';
+    }
+
+    return style;
+  } catch (e) {
+    console.warn('样式应用失败:', e);
+    return {};
+  }
+};
 
 const handleSearch = async () => {
   const list = searchInput.value

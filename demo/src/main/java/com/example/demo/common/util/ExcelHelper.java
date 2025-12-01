@@ -76,7 +76,7 @@ public final class ExcelHelper {
                     result.addError("第" + (i + 1) + "行型号为空，已跳过");
                     continue;
                 }
-                BigDecimal price = parsedPrice == null ? BigDecimal.ZERO : parsedPrice;
+                BigDecimal price = parsedPrice; // 保持空值为 null，不再默认 0
                 HardwarePrice record = new HardwarePrice();
                 record.setPriceDate(priceDate);
                 record.setItemName(itemName.trim());
@@ -226,92 +226,76 @@ public static byte[] writeSettlements(List<SettlementRecord> records) throws IOE
         header.createCell(8).setCellValue(" ");
         header.createCell(9).setCellValue("归属人");
 
-        // --- 1. 按「时间 + 单号」分组 ---
-        Map<String, List<SettlementRecord>> grouped = new HashMap<>();
-        Map<String, LocalDateTime> groupTimeMap = new HashMap<>();
-        for (SettlementRecord r : records) {
-            if (r.getTrackingNumber() == null || r.getTrackingNumber().isBlank()) {
-                continue;
-            }
-            LocalDateTime time = candidateTime(r);
-            if (time == null) {
-                time = LocalDateTime.MIN;
-            }
-            String key = buildGroupKey(r.getTrackingNumber().trim(), time);
-            grouped.computeIfAbsent(key, k -> new ArrayList<>()).add(r);
-            groupTimeMap.putIfAbsent(key, time);
-        }
+        // --- 1. 按“归属人”进行顶级分组 ---
+        Map<String, List<SettlementRecord>> byOwner = records.stream()
+            .collect(Collectors.groupingBy(r -> safe(r.getOwnerUsername())));
 
-        // --- 2. 排序：时间升序，同一时间按单号排序 ---
-        List<Map.Entry<String, List<SettlementRecord>>> orderedGroups = new ArrayList<>(grouped.entrySet());
-        orderedGroups.sort((a, b) -> {
-            LocalDateTime ta = groupTimeMap.getOrDefault(a.getKey(), LocalDateTime.MIN);
-            LocalDateTime tb = groupTimeMap.getOrDefault(b.getKey(), LocalDateTime.MIN);
-            int cmp = ta.compareTo(tb);
-            if (cmp != 0) {
-                return cmp;
-            }
-            return extractTracking(a.getKey()).compareTo(extractTracking(b.getKey()));
-        });
+        // --- 2. 按归属人名称排序，确保输出顺序稳定 ---
+        List<Map.Entry<String, List<SettlementRecord>>> sortedOwnerGroups = new ArrayList<>(byOwner.entrySet());
+        sortedOwnerGroups.sort(Map.Entry.comparingByKey());
 
-        // --- 3. 输出 ---
+        // --- 3. 遍历每个归属人，并处理其下的所有记录 ---
         int rowIndex = 1;
-        String lastOwnerWritten = null;
+        boolean firstOwner = true;
 
-        for (Map.Entry<String, List<SettlementRecord>> e : orderedGroups) {
+        for (Map.Entry<String, List<SettlementRecord>> ownerEntry : sortedOwnerGroups) {
+            String currentOwner = ownerEntry.getKey();
+            List<SettlementRecord> ownerRecords = ownerEntry.getValue();
 
-            List<SettlementRecord> group = e.getValue();
-            String tracking = extractTracking(e.getKey());
-            String timeText = formatDateTime(groupTimeMap.getOrDefault(e.getKey(), LocalDateTime.MIN));
-
-            // ====== 新增：按归属人分组 ======
-            Map<String, List<SettlementRecord>> byOwner = group.stream()
-                    .collect(Collectors.groupingBy(r -> safe(r.getOwnerUsername())));
-
-            // 按归属人名称排序（为了展示稳定）
-            List<Map.Entry<String, List<SettlementRecord>>> ownerGroups =
-                    new ArrayList<>(byOwner.entrySet());
-            ownerGroups.sort(Map.Entry.comparingByKey());
-
-            boolean firstRowInGroup = true;
-            for (int ownerIdx = 0; ownerIdx < ownerGroups.size(); ownerIdx++) {
-                Map.Entry<String, List<SettlementRecord>> og = ownerGroups.get(ownerIdx);
-                List<SettlementRecord> ownerRecords = og.getValue();
-                String currentOwner = safe(og.getKey());
-
-                // 不同归属人（跨单号也算）之间插入3行空白
-                if (lastOwnerWritten != null && !currentOwner.equals(lastOwnerWritten)) {
-                    for (int i = 0; i < 3; i++) {
-                        sheet.createRow(rowIndex++);
-                    }
+            // 在不同归属人之间插入3行空白
+            if (!firstOwner) {
+                for (int i = 0; i < 3; i++) {
+                    sheet.createRow(rowIndex++);
                 }
-                lastOwnerWritten = currentOwner;
+            }
+            firstOwner = false;
 
-                // 输出该归属人的所有商品
-                for (int i = 0; i < ownerRecords.size(); i++) {
+            // --- 3a. 在当前归属人内部，按「时间 + 单号」进行次级分组 ---
+            Map<String, List<SettlementRecord>> trackingGroups = new HashMap<>();
+            Map<String, LocalDateTime> groupTimeMap = new HashMap<>();
+            for (SettlementRecord r : ownerRecords) {
+                if (r.getTrackingNumber() == null || r.getTrackingNumber().isBlank()) continue;
+                LocalDateTime time = candidateTime(r) != null ? candidateTime(r) : LocalDateTime.MIN;
+                String key = buildGroupKey(r.getTrackingNumber().trim(), time);
+                trackingGroups.computeIfAbsent(key, k -> new ArrayList<>()).add(r);
+                groupTimeMap.putIfAbsent(key, time);
+            }
 
-                    SettlementRecord r = ownerRecords.get(i);
+            // --- 3b. 对次级分组按时间排序 ---
+            List<Map.Entry<String, List<SettlementRecord>>> sortedTrackingGroups = new ArrayList<>(trackingGroups.entrySet());
+            sortedTrackingGroups.sort((a, b) -> {
+                LocalDateTime ta = groupTimeMap.getOrDefault(a.getKey(), LocalDateTime.MIN);
+                LocalDateTime tb = groupTimeMap.getOrDefault(b.getKey(), LocalDateTime.MIN);
+                int cmp = ta.compareTo(tb);
+                return cmp != 0 ? cmp : extractTracking(a.getKey()).compareTo(extractTracking(b.getKey()));
+            });
 
+            // --- 3c. 输出当前归属人的所有记录 ---
+            for (Map.Entry<String, List<SettlementRecord>> trackingEntry : sortedTrackingGroups) {
+                List<SettlementRecord> group = trackingEntry.getValue();
+                String tracking = extractTracking(trackingEntry.getKey());
+                String timeText = formatDateTime(groupTimeMap.getOrDefault(trackingEntry.getKey(), LocalDateTime.MIN));
+
+                for (int i = 0; i < group.size(); i++) {
+                    SettlementRecord r = group.get(i);
                     Row row = sheet.createRow(rowIndex++);
 
-                    // 单号组内首次写入时间/订单号（仅第一行显示）
-                    String displayTime = firstRowInGroup ? timeText : "";
-                    String displayTracking = firstRowInGroup ? tracking : "";
-                    firstRowInGroup = false;
+                    // 仅在每个单号组的第一行显示时间和单号
+                    if (i == 0) {
+                        row.createCell(0).setCellValue(timeText);
+                        row.createCell(1).setCellValue(tracking);
+                    } else {
+                        row.createCell(0).setCellValue("");
+                        row.createCell(1).setCellValue("");
+                    }
 
-                    row.createCell(0).setCellValue(displayTime);
-                    row.createCell(1).setCellValue(displayTracking);
                     row.createCell(2).setCellValue(safe(r.getModel()));
                     row.createCell(3).setCellValue(safe(r.getOrderSn()));
                     row.createCell(4).setCellValue(r.getAmount() == null ? 0 : r.getAmount().doubleValue());
                     row.createCell(5).setCellValue(safe(r.getRemark()));
-
-                    // 6, 7, 8 空白列
                     row.createCell(6).setCellValue("    ");
                     row.createCell(7).setCellValue("    ");
                     row.createCell(8).setCellValue("    ");
-
-                    // 归属人放到第 9 列
                     row.createCell(9).setCellValue(currentOwner);
                 }
             }

@@ -47,7 +47,10 @@
         <el-table-column prop="priceDate" label="日期" width="140" />
         <el-table-column prop="itemName" label="型号"> </el-table-column>
         <el-table-column prop="price" label="价格" width="140">
-          <template #default="{ row }">￥{{ formatPrice(row.price) }}</template>
+          <template #default="{ row }">
+            <span v-if="row.price !== null && row.price !== undefined">￥{{ formatPrice(row.price) }}</span>
+            <span v-else></span>
+          </template>
         </el-table-column>
         <el-table-column prop="createdAt" label="创建时间" width="180">
           <template #default="{ row }">{{ formatDateTime(row.createdAt) }}</template>

@@ -187,9 +187,28 @@
           </div>
         </div>
       </template>
-      <ul class="invalid-list">
-        <li v-for="item in invalidTrackings" :key="item">{{ item }}</li>
-      </ul>
+      <el-table :data="invalidTrackings" size="small" style="width: 100%">
+        <el-table-column label="单号" min-width="240">
+          <template #default="{ row, $index }">
+            <el-input v-model.trim="row.trackingNumber" placeholder="请输入单号" @change="persistInvalidTrackings" />
+          </template>
+        </el-table-column>
+        <el-table-column label="备注" min-width="200">
+          <template #default="{ row }">
+            <el-input v-model.trim="row.remark" placeholder="可填写备注" @change="persistInvalidTrackings" />
+          </template>
+        </el-table-column>
+        <el-table-column label="归属人" width="200">
+          <template #default="{ row }">
+            <span>{{ row.ownerUsername || '-' }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="120">
+          <template #default="{ row, $index }">
+            <el-button text type="danger" size="small" @click="clearInvalidOne($index)">清除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
     </el-card>
 
     <el-dialog v-model="batchDialog.visible" title="批量提交单号" width="520px">
@@ -225,6 +244,7 @@
 </template>
 
 <script setup lang="ts">
+import * as XLSX from 'xlsx'
 import { computed, reactive, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import type { FormInstance, FormRules } from 'element-plus';
@@ -297,7 +317,8 @@ const userLoading = ref(false);
 const selectedOwner = ref('');
 const OWNER_STORAGE_KEY = 'submission-owner';
 const INVALID_STORAGE_KEY = 'submission-invalid-trackings';
-const invalidTrackings = ref<string[]>([]);
+type InvalidTracking = { trackingNumber: string; remark?: string; ownerUsername?: string };
+const invalidTrackings = ref<InvalidTracking[]>([]);
 
 const batchDialog = reactive({
   visible: false,
@@ -437,11 +458,19 @@ const normalizeTrackingNumber = (value: string) =>
     .replace(/-+$/, '');
 
 const recordInvalidTrackings = (list: string[]) => {
-  const existing = new Set(invalidTrackings.value);
-  list.forEach(item => {
-    if (!existing.has(item)) {
-      invalidTrackings.value.push(item);
-    }
+  // 按单号去重（不区分大小写）
+  const existsSet = new Set(invalidTrackings.value.map(it => (it.trackingNumber || '').trim().toUpperCase()));
+  list.forEach(tn => {
+    const normalized = (tn || '').trim();
+    if (!normalized) return;
+    const key = normalized.toUpperCase();
+    if (existsSet.has(key)) return;
+    invalidTrackings.value.push({
+      trackingNumber: normalized,
+      remark: '',
+      ownerUsername: isAdmin.value ? (selectedOwner.value?.trim() || '') : ''
+    });
+    existsSet.add(key);
   });
   persistInvalidTrackings();
 };
@@ -474,12 +503,20 @@ const persistInvalidTrackings = () => {
 const loadInvalidTrackings = () => {
   try {
     const cached = localStorage.getItem(INVALID_STORAGE_KEY);
-    if (cached) {
-      const parsed = JSON.parse(cached);
-      if (Array.isArray(parsed)) {
-        invalidTrackings.value = parsed;
+    if (!cached) return;
+    const parsed = JSON.parse(cached);
+    if (!Array.isArray(parsed)) return;
+    // 兼容老数据（字符串数组）与新结构（对象数组）
+    invalidTrackings.value = parsed.map((it: any) => {
+      if (typeof it === 'string') {
+        return { trackingNumber: it, remark: '', ownerUsername: isAdmin.value ? (selectedOwner.value?.trim() || '') : '' } as InvalidTracking;
       }
-    }
+      return {
+        trackingNumber: (it?.trackingNumber ?? '').trim(),
+        remark: (it?.remark ?? '').trim(),
+        ownerUsername: it?.ownerUsername ?? ''
+      } as InvalidTracking;
+    }).filter((it: InvalidTracking) => !!it.trackingNumber);
   } catch (error) {
     console.warn('Failed to load invalid trackings', error);
   }
@@ -593,14 +630,58 @@ const formatOrderTime = (value?: string) => {
   return value.replace('T', ' ').slice(0, 19);
 };
 
+// const exportSubmissions = () => {
+//   if (!submissions.value.length) {
+//     ElMessage.info('暂无可导出的记录');
+//     return;
+//   }
+//   exportLoading.value = true;
+//   try {
+//     const headers = ['下单日期', '订单时间', '单号', '型号', '物流公司', '归属用户', '订单状态', '提交状态', '提交时间'];
+//     const rows = submissions.value.map(item => {
+//       const order = item.order;
+//       return [
+//         order?.orderDate ?? '-',
+//         formatOrderTime(order?.orderTime),
+//         item.trackingNumber ?? '-',
+//         order?.model ?? '-',
+//         order?.category ?? '-',
+//         item.ownerUsername ?? item.username ?? '-',
+//         orderStatusLabel(order?.status),
+//         statusLabel(item.status),
+//         formatDate(item.createdAt)
+//       ];
+//     });
+//     const csv = [headers, ...rows]
+//       .map(cols => cols.map(col => `"${String(col ?? '').replace(/"/g, '""')}"`).join(','))
+//       .join('\n');
+//     const blob = new Blob([csv], { type: 'application/vnd.ms-excel' });
+//     const url = window.URL.createObjectURL(blob);
+//     const a = document.createElement('a');
+//     a.href = url;
+//     a.download = `submissions-${new Date().toISOString().slice(0, 10)}.xls`;
+//     a.click();
+//     window.URL.revokeObjectURL(url);
+//   } finally {
+//     exportLoading.value = false;
+//   }
+// };
 const exportSubmissions = () => {
   if (!submissions.value.length) {
     ElMessage.info('暂无可导出的记录');
     return;
   }
+
   exportLoading.value = true;
+
   try {
-    const headers = ['下单日期', '订单时间', '单号', '型号', '物流公司', '归属用户', '订单状态', '提交状态', '提交时间'];
+    // 表头
+    const headers = [
+      '下单日期', '订单时间', '单号', '型号', '物流公司',
+      '归属用户', '订单状态', '提交状态', '提交时间'
+    ];
+
+    // 数据行
     const rows = submissions.value.map(item => {
       const order = item.order;
       return [
@@ -615,42 +696,107 @@ const exportSubmissions = () => {
         formatDate(item.createdAt)
       ];
     });
-    const csv = [headers, ...rows]
-      .map(cols => cols.map(col => `"${String(col ?? '').replace(/"/g, '""')}"`).join(','))
-      .join('\n');
-    const blob = new Blob([csv], { type: 'application/vnd.ms-excel' });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `submissions-${new Date().toISOString().slice(0, 10)}.xls`;
-    a.click();
-    window.URL.revokeObjectURL(url);
+
+    // 组合所有数据
+    const worksheetData = [headers, ...rows];
+
+    // 创建 Sheet
+    const worksheet = XLSX.utils.aoa_to_sheet(worksheetData);
+
+    // ⭐ 设置列宽（wch: 字符宽度）
+    worksheet['!cols'] = [
+      { wch: 12 }, // 下单日期
+      { wch: 20 }, // 订单时间
+      { wch: 20 }, // 单号
+      { wch: 15 }, // 型号
+      { wch: 12 }, // 物流公司
+      { wch: 15 }, // 归属用户
+      { wch: 12 }, // 订单状态
+      { wch: 12 }, // 提交状态
+      { wch: 20 }, // 提交时间
+    ];
+
+    // 创建工作簿
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Submissions');
+
+    // 导出 Excel
+    XLSX.writeFile(
+      workbook,
+      `submissions-${new Date().toISOString().slice(0, 10)}.xlsx`
+    );
+
   } finally {
     exportLoading.value = false;
   }
 };
-
+// const exportInvalidTrackings = () => {
+//   if (!invalidTrackings.value.length) {
+//     ElMessage.info('暂无可导出的单号');
+//     return;
+//   }
+//   const headers = ['单号', '备注', '归属人'];
+//   const rows = invalidTrackings.value.map(item => [
+//     item.trackingNumber ?? '',
+//     item.remark ?? '',
+//     item.ownerUsername ?? ''
+//   ]);
+//   const csv = [headers, ...rows]
+//     .map(cols => cols.map(col => `"${String(col ?? '').replace(/"/g, '""')}"`).join(','))
+//     .join('\n');
+//   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+//   const url = window.URL.createObjectURL(blob);
+//   const a = document.createElement('a');
+//   a.href = url;
+//   a.download = `invalid-trackings-${new Date().toISOString().slice(0, 10)}.csv`;
+//   a.click();
+//   window.URL.revokeObjectURL(url);
+// };
 const exportInvalidTrackings = () => {
   if (!invalidTrackings.value.length) {
     ElMessage.info('暂无可导出的单号');
     return;
   }
-  const headers = ['未匹配的单号'];
-  const rows = invalidTrackings.value.map(item => [item]);
-  const csv = [headers, ...rows]
-    .map(cols => cols.map(col => `"${String(col ?? '').replace(/"/g, '""')}"`).join(','))
-    .join('\n');
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-  const url = window.URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `invalid-trackings-${new Date().toISOString().slice(0, 10)}.csv`;
-  a.click();
-  window.URL.revokeObjectURL(url);
-};
 
+  const headers = ['单号', '备注', '归属人'];
+
+  const rows = invalidTrackings.value.map(item => [
+    item.trackingNumber ?? '',
+    item.remark ?? '',
+    item.ownerUsername ?? ''
+  ]);
+
+  // 组合数据
+  const worksheetData = [headers, ...rows];
+
+  // 创建 sheet
+  const worksheet = XLSX.utils.aoa_to_sheet(worksheetData);
+
+  // ⭐ 设置列宽
+  worksheet['!cols'] = [
+    { wch: 22 }, // 单号
+    { wch: 30 }, // 备注
+    { wch: 16 }  // 归属人
+  ];
+
+  // 创建工作簿
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'Invalid Trackings');
+
+  // 导出 xlsx
+  XLSX.writeFile(
+    workbook,
+    `invalid-trackings-${new Date().toISOString().slice(0, 10)}.xlsx`
+  );
+};
 const clearInvalidTrackings = () => {
   invalidTrackings.value = [];
+  persistInvalidTrackings();
+};
+
+const clearInvalidOne = (index: number) => {
+  if (index < 0 || index >= invalidTrackings.value.length) return;
+  invalidTrackings.value.splice(index, 1);
   persistInvalidTrackings();
 };
 

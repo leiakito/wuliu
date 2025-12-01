@@ -104,8 +104,8 @@
         :default-sort="{ prop: sortState.prop, order: sortState.order || undefined }"
         @sort-change="handleSortChange"
       >
-        <el-table-column prop="orderDate" label="下单日期" width="120" />
-        <el-table-column prop="orderTime" label="时间" width="180">
+        <el-table-column prop="orderDate" label="下单日期" width="110" />
+        <el-table-column prop="orderTime" label="时间" width="170">
           <template #default="{ row }">{{ formatDateTime(row.orderTime) }}</template>
         </el-table-column>
         <el-table-column prop="trackingNumber" label="运单号" width="160">
@@ -113,25 +113,27 @@
             <span :style="styleFor(row, 'tracking')">{{ row.trackingNumber }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="model" label="型号">
+        <el-table-column prop="model" label="型号" width="160">
           <template #default="{ row }">
             <span :style="styleFor(row, 'model')">{{ row.model }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="sn" label="SN" width="180">
+        <el-table-column prop="sn" label="SN" width="200">
           <template #default="{ row }">
             <span class="sn-text" :style="styleFor(row, 'sn')">{{ row.sn }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="amount" label="金额" width="140">
+        <el-table-column prop="amount" label="金额" width="100">
           <template #default="{ row }">
-            <span :style="styleFor(row, 'amount')">￥{{ formatAmount(row.amount) }}</span>
+            <span :style="styleFor(row, 'amount')">
+              <template v-if="row.amount !== null && row.amount !== undefined">￥{{ formatAmount(row.amount) }}</template>
+            </span>
           </template>
         </el-table-column>
-        <el-table-column prop="ownerUsername" label="归属用户" width="120" />
-        <el-table-column
+        <el-table-column prop="ownerUsername" label="归属用户" width="100" />
+        <el-table-column 
           prop="status"
-          width="160"
+          width="100"
           sortable="custom"
           :sort-orders="['ascending', 'descending']"
         >
@@ -155,7 +157,7 @@
               {{ statusLabel(row.status) }}
             </el-tag>
           </template>
-        </el-table-column>
+        </el-table-column >
         <el-table-column v-if="isAdmin" label="导入状态" width="140">
           <template #default="{ row }">
             <span v-if="row.imported" class="status-text">已录入系统</span>

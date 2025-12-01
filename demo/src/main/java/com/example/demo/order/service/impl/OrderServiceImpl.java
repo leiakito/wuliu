@@ -31,6 +31,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import lombok.Data;
@@ -248,6 +249,7 @@ public class OrderServiceImpl implements OrderService {
 
     @Override
     @Transactional
+    @CacheEvict(value = "orders", allEntries = true)
     public Map<String, Object> importOrders(MultipartFile file, String operator) {
         try {
             List<OrderRecord> records = ExcelHelper.readOrders(file.getInputStream(), operator);
@@ -324,6 +326,9 @@ public class OrderServiceImpl implements OrderService {
     }
 
     @Override
+    @Cacheable(value = "orders",
+                   key = "'page1:' + #request.size + ':' + #request.startDate + ':' + #request.endDate + ':' + #request.category + ':' + #request.status + ':' + #request.keyword + ':' + #request.ownerUsername + ':' + #request.sortBy + ':' + #request.sortOrder", 
+                   condition = "#request.page == 1")
     public IPage<OrderRecord> query(OrderFilterRequest request) {
         Page<OrderRecord> page = Page.of(request.getPage(), request.getSize());
         LambdaQueryWrapper<OrderRecord> wrapper = new LambdaQueryWrapper<>();
@@ -341,9 +346,16 @@ public class OrderServiceImpl implements OrderService {
             wrapper.eq(OrderRecord::getStatus, request.getStatus());
         }
         if (request.getKeyword() != null && !request.getKeyword().isBlank()) {
-            wrapper.and(w -> w.like(OrderRecord::getTrackingNumber, request.getKeyword())
-                .or().like(OrderRecord::getSn, request.getKeyword())
-                .or().like(OrderRecord::getModel, request.getKeyword()));
+            // 使用全文索引进行关键字搜索，性能远高于 LIKE
+            String keyword = request.getKeyword();
+            // 在布尔模式下，+ 表示必须包含，* 是通配符
+            // 这里简单处理，在每个词后加 * 实现前缀匹配
+            String booleanModeKeyword = Arrays.stream(keyword.split("\\s+"))
+                .filter(s -> !s.isEmpty())
+                .map(s -> "+" + s + "*")
+                .collect(Collectors.joining(" "));
+
+            wrapper.apply("MATCH(tracking_number, sn, model) AGAINST({0} IN BOOLEAN MODE)", booleanModeKeyword);
         }
 
         // 归属用户筛选（基于 user_submission 最新记录的 ownerUsername/username）
@@ -664,6 +676,7 @@ public class OrderServiceImpl implements OrderService {
 
     @Override
     @Transactional
+    @CacheEvict(value = "orders", allEntries = true)
     public OrderRecord create(OrderCreateRequest request, String operator) {
         LambdaQueryWrapper<OrderRecord> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(OrderRecord::getSn, request.getSn());
@@ -704,6 +717,7 @@ public class OrderServiceImpl implements OrderService {
 
     @Override
     @Transactional
+    @CacheEvict(value = "orders", allEntries = true)
     public void updateStatus(Long id, String status) {
         OrderRecord record = orderRecordMapper.selectById(id);
         if (record == null) {
@@ -715,6 +729,7 @@ public class OrderServiceImpl implements OrderService {
 
     @Override
     @Transactional
+    @CacheEvict(value = "orders", allEntries = true)
     public void updateAmount(Long id, OrderAmountRequest request) {
         OrderRecord record = orderRecordMapper.selectById(id);
         if (record == null) {
@@ -798,7 +813,7 @@ public class OrderServiceImpl implements OrderService {
     }
 
     @Override
-    @CacheEvict(value = "orderDetail", allEntries = true)
+    @CacheEvict(value = {"orders", "orderDetail"}, allEntries = true)
     @Transactional
     public List<OrderRecord> syncFromThirdParty(BatchFetchRequest request, String operator) {
         if (request == null || CollectionUtils.isEmpty(request.getTrackingNumbers())) {
@@ -839,6 +854,7 @@ public class OrderServiceImpl implements OrderService {
 
     @Override
     @Transactional
+    @CacheEvict(value = "orders", allEntries = true)
     public OrderRecord update(Long id, OrderUpdateRequest request) {
         OrderRecord record = orderRecordMapper.selectById(id);
         if (record == null) {

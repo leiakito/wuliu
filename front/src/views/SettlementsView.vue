@@ -33,6 +33,12 @@
           :disabled="!selectedIds.length"
           @click="openBatchConfirmDialog"
         >批量确认</el-button>
+        <el-button
+          v-if="isAdmin"
+          type="warning"
+          plain
+          @click="handleConfirmAll"
+        >确认全部</el-button>
         <el-button @click="exportData" :loading="exporting">导出 Excel</el-button>
         <el-button
           v-if="isAdmin"
@@ -174,15 +180,30 @@
           sortable="custom"
           :sort-orders="['ascending', 'descending']"
         >
-          <template #default="{ row }"><span :style="styleFor(row, 'amount')">￥{{ formatAmount(row.amount) }}</span></template>
+          <template #default="{ row }">
+            <el-input-number
+              v-if="row.status === 'PENDING'"
+              v-model="row.amount"
+              :min="0"
+              :step="10"
+              size="small"
+              controls-position="right"
+              placeholder="输入金额确认"
+              style="width: 100%"
+              @change="(currentValue) => handleAmountChange(row, currentValue)"
+            />
+            <span v-else :style="styleFor(row, 'amount')">
+              <template v-if="row.amount !== null && row.amount !== undefined">￥{{ formatAmount(row.amount) }}</template>
+            </span>
+          </template>
         </el-table-column>
-        <el-table-column prop="ownerUsername" label="归属用户" width="140">
+        <el-table-column prop="ownerUsername" label="归属用户" width="100">
           <template #default="{ row }">{{ row.ownerUsername || '-' }}</template>
         </el-table-column>
         <el-table-column
           prop="status"
           label="状态"
-          width="120"
+          width="100"
           sortable="custom"
           :sort-orders="['ascending', 'descending']"
         >
@@ -350,7 +371,8 @@ import {
   updateSettlementPriceByModel,
   confirmSettlementsBatch,
   updateSettlementAmount,
-  updateSettlementPriceBySn
+  updateSettlementPriceBySn,
+  confirmAllSettlements
 } from '@/api/settlements';
 import { listUsers } from '@/api/users';
 import { listOwnerUsernames } from '@/api/submissions';
@@ -607,6 +629,37 @@ const handleSortChange = (options: { prop: string; order: SortOrder }) => {
 const handleRowClick = (row: SettlementRecord) => {
   const alreadySelected = selectedIds.value.includes(row.id);
   tableRef.value?.toggleRowSelection(row, !alreadySelected);
+};
+
+const handleAmountChange = async (row: SettlementRecord, currentValue: number | undefined, oldValue: number | undefined) => {
+  if (currentValue === null || currentValue === undefined) {
+    return; // 如果用户清空了输入框，则不执行任何操作
+  }
+
+  // 如果值没有实际变化，则不触发确认
+  if (currentValue === oldValue) {
+    return;
+  }
+
+  try {
+    const payload: SettlementConfirmRequest = {
+      amount: currentValue,
+      remark: row.remark, // 保留现有的备注
+    };
+    await confirmSettlement(row.id, payload);
+
+    // 直接在界面上更新行状态，提供即时反馈
+    row.status = 'CONFIRMED';
+    row.amount = currentValue;
+
+    ElMessage.success(`记录 ${row.trackingNumber || row.orderSn} 已确认`);
+
+  } catch (error) {
+    console.error('快速确认失败:', error);
+    // 如果API调用失败，将金额恢复到旧值
+    row.amount = oldValue;
+    ElMessage.error('确认失败，请重试');
+  }
 };
 
 const openBatchPriceDialog = () => {
@@ -957,6 +1010,42 @@ watch(isAdmin, (v) => { if (v) loadUsers(); }, { immediate: true });
 
 // 每次从 keep-alive 返回本页，强制刷新归属用户下拉，避免浏览器内存缓存
 onActivated(() => { if (isAdmin.value) loadUsers(); });
+
+const handleConfirmAll = async () => {
+  if (!isAdmin.value) return;
+
+  try {
+    await ElMessageBox.confirm(
+      '这将根据当前筛选条件，确认所有待结账的记录（仅处理有金额的条目）。此操作不可撤销，确定继续吗？',
+      '确认全部操作',
+      {
+        confirmButtonText: '确定确认',
+        cancelButtonText: '取消',
+        type: 'warning',
+      }
+    );
+  } catch {
+    // 用户取消
+    return;
+  }
+
+  loading.value = true;
+  try {
+    // 准备筛选参数，并强制状态为 PENDING
+    const payload: SettlementFilterRequest = { ...params.value, status: 'PENDING' };
+    // 后端分页参数在 confirmAll 中不需要，移除它们
+    delete payload.page;
+    delete payload.size;
+
+    const count = await confirmAllSettlements(payload);
+    ElMessage.success(`操作成功，已确认 ${count} 条记录。`);
+    loadData(); // 重新加载数据
+  } catch (error) {
+    console.error('确认全部失败:', error);
+  } finally {
+    loading.value = false;
+  }
+};
 
 loadData();
 </script>

@@ -63,3 +63,6 @@ export const updateSettlementAmount = (id: number, payload: SettlementAmountRequ
 
 export const updateSettlementPriceBySn = (payload: SettlementBatchSnPriceRequest) =>
   apiClient.put<SettlementBatchSnPriceResponse>('/settlements/price-by-sn', payload);
+
+export const confirmAllSettlements = (payload: SettlementFilterRequest) =>
+  apiClient.put<number>('/settlements/confirm-all', payload);

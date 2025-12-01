@@ -110,6 +110,15 @@ public class SettlementController {
         return ApiResponse.ok();
     }
 
+    @PutMapping("/confirm-all")
+    @SaCheckRole("ADMIN")
+    @LogOperation("确认全部查询结果")
+    @Operation(summary = "确认全部查询结果", description = "根据当前筛选条件，确认所有待结账的记录")
+    public ApiResponse<Integer> confirmAll(@RequestBody SettlementFilterRequest request) {
+        int count = settlementService.confirmAll(request, StpUtil.getLoginIdAsString());
+        return ApiResponse.ok(count);
+    }
+
     @DeleteMapping
     @SaCheckRole("ADMIN")
     @LogOperation("批量删除待结账")

@@ -485,10 +485,36 @@ public class SettlementServiceImpl implements SettlementService {
             return;
         }
         for (Long id : request.getIds()) {
-            SettlementConfirmRequest payload = new SettlementConfirmRequest();
-            payload.setAmount(request.getAmount());
-            payload.setRemark(request.getRemark());
-            confirm(id, payload, operator);
+            SettlementRecord record = settlementRecordMapper.selectById(id);
+            if (record == null) {
+                // 记录不存在，跳过本条
+                continue;
+            }
+
+            // 1) 计算目标金额：优先使用批量确认的金额，其次使用结算记录自身金额
+            BigDecimal targetAmount = request.getAmount();
+            if (targetAmount == null) {
+                targetAmount = record.getAmount();
+            }
+
+            // 2) 如果最终金额仍为空：根据需求，批量确认时跳过本条记录，不修改状态
+            if (targetAmount == null) {
+                continue;
+            }
+
+            // 3) 按单条确认的规则更新该记录及其关联订单/提交状态
+            record.setAmount(targetAmount);
+            record.setRemark(request.getRemark());
+            record.setStatus("CONFIRMED");
+            record.setSettleBatch("BATCH-" + LocalDate.now());
+            record.setPayableAt(LocalDate.now());
+            record.setConfirmedBy(operator);
+            record.setConfirmedAt(LocalDateTime.now());
+            settlementRecordMapper.updateById(record);
+
+            // 同步订单金额与状态，并根据需要更新用户提交状态
+            updateOrderWithSettlement(record, targetAmount, null);
+            markSubmissionCompleted(record.getTrackingNumber());
         }
     }
 
@@ -976,5 +1002,34 @@ public class SettlementServiceImpl implements SettlementService {
         cacheService.evictAllOwnerCache();
 
         return count;
+    }
+
+    @Override
+    @Transactional
+    public int confirmAll(SettlementFilterRequest request, String operator) {
+        // 强制状态为 PENDING，只确认待结账的记录
+        request.setStatus("PENDING");
+        LambdaQueryWrapper<SettlementRecord> wrapper = buildQueryWrapper(request);
+
+        List<SettlementRecord> recordsToConfirm = settlementRecordMapper.selectList(wrapper);
+
+        int confirmedCount = 0;
+        for (SettlementRecord record : recordsToConfirm) {
+            // 只处理有金额的记录
+            if (record.getAmount() != null) {
+                record.setStatus("CONFIRMED");
+                record.setSettleBatch("BATCH-" + LocalDate.now());
+                record.setPayableAt(LocalDate.now());
+                record.setConfirmedBy(operator);
+                record.setConfirmedAt(LocalDateTime.now());
+                settlementRecordMapper.updateById(record);
+
+                // 同步订单金额与状态，并根据需要更新用户提交状态
+                updateOrderWithSettlement(record, record.getAmount(), null);
+                markSubmissionCompleted(record.getTrackingNumber());
+                confirmedCount++;
+            }
+        }
+        return confirmedCount;
     }
 }

@@ -39,4 +39,6 @@ public interface SettlementService {
     SettlementBatchSnPriceResponse updateAmountBySn(SettlementBatchSnPriceRequest request);
 
     int deleteConfirmed();
+
+    int confirmAll(SettlementFilterRequest request, String operator);
 }

@@ -134,11 +134,41 @@ SET @exists := (SELECT COUNT(*) FROM information_schema.statistics WHERE table_s
 SET @sql := IF(@exists = 0, CONCAT('CREATE INDEX ', @idx, ' ON ', @tbl, '(id, created_at)'), 'DO 0');
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
+-- =================record 全文索引（用于关键字搜索优化）
+-- =============================
+SET @exists_ft := (
+  SELECT COUNT(*) FROM information_schema.statistics
+  WHERE table_schema = DATABASE()
+    AND table_name = 'order_record'
+    AND index_name = 'ft_order_keyword'
+);
+SET @sql_ft := IF(@exists_ft = 0,
+  'CREATE FULLTEXT INDEX ft_order_keyword ON order_record(tracking_number, sn, model)',
+  'DO 0'
+);
+PREPARE stmt_ft FROM @sql_ft; EXECUTE stmt_ft; DEALLOCATE PREPARE stmt_ft;
+
 -- =============================
 -- C. 刷新统计信息（可选）
 -- =============================
 ANALYZE TABLE order_record;
 ANALYZE TABLE settlement_record;
+
+-- =============================
+-- D. 允许 hardware_price.price 为 NULL（幂等）
+-- =============================
+SET @need := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'hardware_price'
+    AND COLUMN_NAME = 'price'
+    AND IS_NULLABLE = 'NO'
+);
+SET @sql := IF(@need > 0,
+  'ALTER TABLE hardware_price MODIFY price DECIMAL(15,2) NULL',
+  'DO 0'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 -- 验证（按需执行）
 -- EXPLAIN SELECT * FROM settlement_record WHERE order_id IN (SELECT id FROM order_record WHERE UPPER(sn) = 'TEST');

@@ -158,7 +158,7 @@ public class SettlementCacheService {
     /**
      * 清除硬件价格缓存
      */
-    public void evictPriceCache(String model, LocalDate date) {
+    public void evictHardwarePrice(String model, LocalDate date) {
         if (model != null && !model.isBlank() && date != null) {
             String key = PRICE_CACHE_PREFIX + model + ":" + date;
             redisTemplate.delete(key);

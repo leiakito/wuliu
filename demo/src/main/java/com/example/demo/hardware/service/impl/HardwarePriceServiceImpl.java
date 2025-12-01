@@ -38,6 +38,7 @@ public class HardwarePriceServiceImpl implements HardwarePriceService {
 
     private final HardwarePriceMapper hardwarePriceMapper;
     private final TransactionTemplate transactionTemplate;
+    private final com.example.demo.settlement.service.SettlementCacheService settlementCacheService;
 
     @Override
     public List<HardwarePrice> list(HardwarePriceQuery query) {
@@ -79,13 +80,24 @@ public class HardwarePriceServiceImpl implements HardwarePriceService {
         existed.setItemName(normalizeItemName(request.getItemName()));
         existed.setPrice(request.getPrice());
         hardwarePriceMapper.updateById(existed);
+
+        // 清除结算模块中可能存在的旧价格缓存
+        settlementCacheService.evictHardwarePrice(normalizeItemName(request.getItemName()), request.getPriceDate());
+
         return existed;
     }
 
     @Override
     @Transactional
     public void delete(Long id) {
-        hardwarePriceMapper.deleteById(id);
+        // 先查询出实体，以便获取清除缓存所需的信息
+        HardwarePrice price = hardwarePriceMapper.selectById(id);
+        if (price != null) {
+            // 从数据库中删除
+            hardwarePriceMapper.deleteById(id);
+            // 清除结算模块中可能存在的缓存
+            settlementCacheService.evictHardwarePrice(normalizeItemName(price.getItemName()), price.getPriceDate());
+        }
     }
 
     @Override
@@ -203,7 +215,10 @@ public class HardwarePriceServiceImpl implements HardwarePriceService {
         for (HardwarePrice item : latestByItem.values()) {
             HardwarePrice existed = existedMap.get(item.getItemName());
             if (existed != null) {
-                existed.setPrice(item.getPrice());
+                // 仅当导入值非空时才覆盖原有价格；为空则保留数据库现有价格
+                if (item.getPrice() != null) {
+                    existed.setPrice(item.getPrice());
+                }
                 existed.setItemName(item.getItemName());
                 existed.setCreatedBy(operator);
                 hardwarePriceMapper.updateById(existed);
