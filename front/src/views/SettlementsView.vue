@@ -182,15 +182,15 @@
         >
           <template #default="{ row }">
             <el-input-number
-              v-if="row.status === 'PENDING'"
+              v-if="row.status === 'PENDING' || row.status === 'CONFIRMED'"
               v-model="row.amount"
               :min="0"
               :step="10"
               size="small"
-              controls-position="right"
+              :controls="false"
               placeholder="输入金额确认"
               style="width: 100%"
-              @change="(currentValue) => handleAmountChange(row, currentValue)"
+              @change="(currentValue, oldValue) => handleAmountChange(row, currentValue, oldValue)"
             />
             <span v-else :style="styleFor(row, 'amount')">
               <template v-if="row.amount !== null && row.amount !== undefined">￥{{ formatAmount(row.amount) }}</template>
@@ -250,7 +250,7 @@
             v-model="confirmDialog.form.amount"
             :min="0"
             :step="10"
-            controls-position="right"
+            :controls="false"
             style="width: 240px"
           />
         </el-form-item>
@@ -291,7 +291,7 @@
         </el-form-item>
         </template>
         <el-form-item label="金额">
-          <el-input-number v-model="batchPriceDialog.form.amount" :min="0" :step="10" />
+          <el-input-number v-model="batchPriceDialog.form.amount" :min="0" :step="10" :controls="false" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -329,7 +329,7 @@
           </div>
         </el-form-item>
         <el-form-item label="金额">
-          <el-input-number v-model="batchSnPriceDialog.form.amount" :min="0" :step="10" />
+          <el-input-number v-model="batchSnPriceDialog.form.amount" :min="0" :step="10" :controls="false" />
         </el-form-item>
         <el-alert
           v-if="batchSnPriceDialog.duplicateSns.length > 0"
@@ -942,7 +942,13 @@ const exportConfirmed = async () => {
     const params: SettlementExportRequest = {
       status: 'CONFIRMED'
     };
-    await downloadExcel(params, 'settlements-confirmed.xlsx');
+    // 生成包含日期的文件名，格式为 MM月DD日.xlsx
+    const now = new Date();
+    const month = now.getMonth() + 1;
+    const day = now.getDate();
+    const fileName = `${month}月${day}日.xlsx`;
+    
+    await downloadExcel(params, fileName);
 
     // 导出后从数据库中删除已确认的数据
     const deletedCount = await deleteConfirmedSettlements();
