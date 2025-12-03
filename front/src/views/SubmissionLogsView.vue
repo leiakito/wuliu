@@ -58,7 +58,7 @@
         <el-table-column prop="username" label="用户名" width="160" />
         <el-table-column label="原文本">
           <template #default="{ row }">
-            <span class="log-content">{{ row.content }}</span>
+            <span class="log-content">{{ formatLogContent(row.content) }}</span>
           </template>
         </el-table-column>
       </el-table>
@@ -221,6 +221,18 @@ const formatDateTime = (value?: string) => {
     second: '2-digit'
   }).format(date);
   return shanghai.replace(/\//g, '-');
+};
+
+// 过滤提交原文中的空白行，只保留有内容的行
+const formatLogContent = (value?: string): string => {
+  if (!value) return '';
+  return value
+    .replace(/\u00A0/g, ' ') // 将不换行空格替换为普通空格
+    .replace(/\u3000/g, ' ') // 全角空格转半角
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .filter(line => line.length > 0)
+    .join('\n');
 };
 
 loadUserOptions();

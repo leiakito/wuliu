@@ -155,7 +155,7 @@
         <el-table-column
           prop="trackingNumber"
           label="单号"
-          width="160"
+          width="260"
           sortable="custom"
           :sort-orders="['ascending', 'descending']"
         >
@@ -163,12 +163,12 @@
             <span :style="styleFor(row, 'tracking')">{{ row.trackingNumber }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="model" label="型号" width="160">
+        <el-table-column prop="model" label="型号" width="400">
           <template #default="{ row }">
             <span :style="styleFor(row, 'model')">{{ row.model || '-' }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="orderSn" label="SN" width="180">
+        <el-table-column prop="orderSn" label="SN" width="340">
           <template #default="{ row }">
             <span :style="styleFor(row, 'sn')">{{ row.orderSn || '-' }}</span>
           </template>
@@ -219,7 +219,7 @@
             <span :style="styleFor(row, 'remark')">{{ row.remark || '-' }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="120">
+        <el-table-column label="操作" width="160">
           <template #default="{ row }">
             <el-button
               v-if="isAdmin && row.status !== 'CONFIRMED'"
@@ -227,6 +227,13 @@
               type="primary"
               @click="openConfirm(row)">
               确认
+            </el-button>
+            <el-button
+              v-if="isAdmin"
+              link
+              type="danger"
+              @click="handleDeleteOne(row)">
+              删除
             </el-button>
           </template>
         </el-table-column>
@@ -717,6 +724,27 @@ const handleDelete = async () => {
   ElMessage.success('已删除');
   selectedIds.value = [];
   loadData();
+};
+
+const handleDeleteOne = async (row: SettlementRecord) => {
+  if (!isAdmin.value) return;
+  try {
+    await ElMessageBox.confirm('确认删除该结算记录吗？', '二次确认', {
+      type: 'warning',
+      confirmButtonText: '确定',
+      cancelButtonText: '取消'
+    });
+  } catch {
+    return; // 用户取消
+  }
+  try {
+    await deleteSettlements([row.id]);
+    ElMessage.success('已删除');
+    loadData();
+  } catch (error) {
+    console.error('删除失败:', error);
+    ElMessage.error('删除失败');
+  }
 };
 
 const submitBatchPrice = async () => {

@@ -42,28 +42,38 @@
       </el-form>
     </el-card>
 
-    <el-card class="table-card">
-      <el-table :data="sortedPrices" v-loading="loading">
-        <el-table-column prop="priceDate" label="日期" width="140" />
-        <el-table-column prop="itemName" label="型号"> </el-table-column>
-        <el-table-column prop="price" label="价格" width="140">
-          <template #default="{ row }">
-            <span v-if="row.price !== null && row.price !== undefined">￥{{ formatPrice(row.price) }}</span>
-            <span v-else></span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="createdAt" label="创建时间" width="180">
-          <template #default="{ row }">{{ formatDateTime(row.createdAt) }}</template>
-        </el-table-column>
-        <el-table-column prop="createdBy" label="录入人" width="140" />
-        <el-table-column v-if="isAdmin" label="操作" width="160">
-          <template #default="{ row }">
-            <el-button link type="primary" @click="openDialog(row)">编辑</el-button>
-            <el-button link type="danger" @click="handleDelete(row)">删除</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
+    <!-- 日期 -> 型号与价格 两级菜单视图 -->
+    <el-card class="menu-card" v-if="groupedList.length">
+      <div class="menu-header">
+        <span class="title">按日期查看</span>
+        <span class="muted small">共 {{ prices.length }} 条</span>
+      </div>
+      <el-scrollbar height="70vh">
+        <el-menu class="group-menu" :unique-opened="true">
+          <el-sub-menu v-for="(group, idx) in groupedList" :key="group.date" :index="String(idx)">
+            <template #title>
+              <span>{{ group.date }}</span>
+              <el-tag size="small" style="margin-left: 8px">{{ group.items.length }}</el-tag>
+            </template>
+            <el-menu-item v-for="item in group.items" :key="item.id" :index="`${idx}-${item.id}`">
+              <div class="menu-item-line">
+                <span class="name">{{ item.itemName }}</span>
+                <span class="right">
+                  <span class="price" v-if="item.price !== null && item.price !== undefined">￥{{ formatPrice(item.price) }}</span>
+                  <span class="price muted" v-else>-</span>
+                  <span class="muted small meta">{{ formatDateTime(item.createdAt) }} · {{ item.createdBy }}</span>
+                  <span class="row-actions" v-if="isAdmin">
+                    <el-button link type="primary" @click.stop="openDialog(item)">编辑</el-button>
+                    <el-button link type="danger" @click.stop="handleDelete(item)">删除</el-button>
+                  </span>
+                </span>
+              </div>
+            </el-menu-item>
+          </el-sub-menu>
+        </el-menu>
+      </el-scrollbar>
     </el-card>
+
 
     <el-dialog v-model="dialog.visible" title="硬件价格" width="520px">
       <el-form ref="formRef" :model="dialog.form" :rules="rules" label-width="90px">
@@ -237,6 +247,30 @@ const rules: FormRules = {
 
 const sortedPrices = computed(() => prices.value);
 
+// 按日期分组用于两级菜单展示
+interface PriceGroup { date: string; items: HardwarePrice[] }
+const groupedList = computed<PriceGroup[]>(() => {
+  const map = new Map<string, HardwarePrice[]>();
+  for (const p of prices.value) {
+    const date = p.priceDate && /^\d{4}-\d{2}-\d{2}$/.test(p.priceDate) ? p.priceDate : '未标注日期';
+    if (!map.has(date)) map.set(date, []);
+    map.get(date)!.push(p);
+  }
+  const groups = Array.from(map.entries()).map(([date, items]) => ({
+    date,
+    items: items.slice().sort((a, b) => (a.itemName || '').localeCompare(b.itemName || '', 'zh-CN'))
+  }));
+  const isDate = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s);
+  groups.sort((a, b) => {
+    const ad = isDate(a.date), bd = isDate(b.date);
+    if (ad && bd) return b.date.localeCompare(a.date);
+    if (ad) return -1; // 有效日期在前
+    if (bd) return 1;
+    return a.date.localeCompare(b.date, 'zh-CN');
+  });
+  return groups;
+});
+
 const defaultRange = () => {
   const end = new Date();
   const start = new Date();
@@ -244,7 +278,12 @@ const defaultRange = () => {
   return [formatDate(start), formatDate(end)];
 };
 
-const formatDate = (date: Date) => date.toISOString().slice(0, 10);
+const formatDate = (date: Date) => {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+};
 
 const loadStoredFilters = () => {
   try {
@@ -512,6 +551,47 @@ initFilters();
 
 .table-card {
   margin-top: 16px;
+}
+
+.menu-card {
+  margin-top: 16px;
+}
+.menu-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.group-menu {
+  border-right: none;
+}
+.menu-item-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+}
+.menu-item-line .name {
+  max-width: 46%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.menu-item-line .right {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+.menu-item-line .price {
+  min-width: 88px;
+  text-align: right;
+}
+.menu-item-line .meta {
+  margin-left: 12px;
+}
+.menu-item-line .row-actions .el-button {
+  padding: 0 4px;
 }
 
 .upload-drop {

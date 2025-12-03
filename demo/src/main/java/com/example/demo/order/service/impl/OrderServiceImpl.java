@@ -77,6 +77,55 @@ public class OrderServiceImpl implements OrderService {
         return m;
     }
 
+    private Map<String, CellStyleSnap> buildStyleMapFromDb(OrderRecord dbRecord, List<OrderCellStyle> dbStyles) {
+        Map<String, OrderCellStyle> styleMap = new HashMap<>();
+        if (dbStyles != null) {
+            for (OrderCellStyle s : dbStyles) {
+                styleMap.put(s.getField(), s);
+            }
+        }
+
+        Map<String, CellStyleSnap> m = new HashMap<>();
+
+        // 从持久化的样式表读取，如果没有则使用默认值
+        OrderCellStyle trackingStyle = styleMap.get("tracking");
+        m.put("tracking", new CellStyleSnap(
+            trackingStyle != null ? norm(trackingStyle.getBgColor()) : norm(null),
+            trackingStyle != null ? norm(trackingStyle.getFontColor()) : norm(null),
+            trackingStyle != null ? bool(trackingStyle.getStrike()) : Boolean.FALSE
+        ));
+
+        OrderCellStyle modelStyle = styleMap.get("model");
+        m.put("model", new CellStyleSnap(
+            modelStyle != null ? norm(modelStyle.getBgColor()) : norm(null),
+            modelStyle != null ? norm(modelStyle.getFontColor()) : norm(null),
+            modelStyle != null ? bool(modelStyle.getStrike()) : Boolean.FALSE
+        ));
+
+        OrderCellStyle snStyle = styleMap.get("sn");
+        m.put("sn", new CellStyleSnap(
+            snStyle != null ? norm(snStyle.getBgColor()) : norm(null),
+            snStyle != null ? norm(snStyle.getFontColor()) : norm(null),
+            snStyle != null ? bool(snStyle.getStrike()) : Boolean.FALSE
+        ));
+
+        OrderCellStyle remarkStyle = styleMap.get("remark");
+        m.put("remark", new CellStyleSnap(
+            remarkStyle != null ? norm(remarkStyle.getBgColor()) : norm(null),
+            remarkStyle != null ? norm(remarkStyle.getFontColor()) : norm(null),
+            remarkStyle != null ? bool(remarkStyle.getStrike()) : Boolean.FALSE
+        ));
+
+        OrderCellStyle amountStyle = styleMap.get("amount");
+        m.put("amount", new CellStyleSnap(
+            amountStyle != null ? norm(amountStyle.getBgColor()) : norm(null),
+            amountStyle != null ? norm(amountStyle.getFontColor()) : norm(null),
+            amountStyle != null ? bool(amountStyle.getStrike()) : Boolean.FALSE
+        ));
+
+        return m;
+    }
+
     private String norm(String c) {
         // null / 空字符串 / #FFFFFF / #FFF 统一视为白色，不提示变化
         if (c == null) return "#FFFFFF";
@@ -242,6 +291,101 @@ public class OrderServiceImpl implements OrderService {
         return changed;
     }
 
+    private boolean isChangedAndUpdateBaseline(OrderRecord r) {
+        // 1. 首先查询数据库中是否存在相同运单号+SN 的最新记录
+        OrderRecord dbLatest = null;
+        List<OrderCellStyle> dbStyles = null;
+
+        // 只要有运单号或SN其中之一，就尝试查询数据库
+        if (StringUtils.hasText(r.getTrackingNumber()) || StringUtils.hasText(r.getSn())) {
+            LambdaQueryWrapper<OrderRecord> wrapper = new LambdaQueryWrapper<>();
+
+            // 构建查询条件：运单号和SN都要匹配（包括 null 的情况）
+            if (StringUtils.hasText(r.getTrackingNumber())) {
+                wrapper.eq(OrderRecord::getTrackingNumber, r.getTrackingNumber());
+            } else {
+                wrapper.isNull(OrderRecord::getTrackingNumber);
+            }
+
+            if (StringUtils.hasText(r.getSn())) {
+                wrapper.eq(OrderRecord::getSn, r.getSn());
+            } else {
+                wrapper.isNull(OrderRecord::getSn);
+            }
+
+            wrapper.orderByDesc(OrderRecord::getId).last("LIMIT 1");
+            dbLatest = orderRecordMapper.selectOne(wrapper);
+
+            if (dbLatest != null) {
+                // 查询该记录的样式
+                dbStyles = orderCellStyleMapper.selectList(
+                    new QueryWrapper<OrderCellStyle>().lambda()
+                        .eq(OrderCellStyle::getOrderId, dbLatest.getId())
+                );
+            }
+        }
+
+        // 2. 如果数据库中存在记录，进行比较
+        if (dbLatest != null) {
+            Map<String, CellStyleSnap> curStyle = buildStyleMap(r);
+            Map<String, String> curValue = buildValueMap(r);
+
+            // 从数据库记录构建样式和内容
+            Map<String, CellStyleSnap> dbStyleMap = buildStyleMapFromDb(dbLatest, dbStyles);
+            Map<String, String> dbValueMap = buildValueMap(dbLatest);
+
+            List<String> order = Arrays.asList("tracking","model","sn","remark","amount");
+            boolean changed = false;
+
+            for (String f : order) {
+                CellStyleSnap a = dbStyleMap.get(f);
+                CellStyleSnap b = curStyle.get(f);
+                boolean styleChanged = !Objects.equals(a == null ? null : a.getBg(),   b == null ? null : b.getBg())
+                                    || !Objects.equals(a == null ? null : a.getFont(), b == null ? null : b.getFont())
+                                    || !Objects.equals(a == null ? Boolean.FALSE : a.getStrike(), b == null ? Boolean.FALSE : b.getStrike());
+                String va = dbValueMap.get(f);
+                String vb = curValue.get(f);
+                boolean valueChanged = !Objects.equals(va, vb);
+                if (styleChanged || valueChanged) {
+                    changed = true;
+                    break;
+                }
+            }
+
+            // 仍然更新内存快照（用于会话内的快速比较）
+            String key = styleKey(r);
+            LAST_IMPORT_SNAPSHOT.put(key, curStyle);
+            LAST_VALUE_SNAPSHOT.put(key, curValue);
+            if (r.getExcelRowIndex() != null) {
+                LAST_STYLE_BY_ROW.put(r.getExcelRowIndex(), curStyle);
+                LAST_VALUE_BY_ROW.put(r.getExcelRowIndex(), curValue);
+            }
+            String tKey = (r.getTrackingNumber() == null ? "" : r.getTrackingNumber().toUpperCase(Locale.ROOT));
+            LAST_STYLE_BY_TRACKING.put(tKey, curStyle);
+            LAST_VALUE_BY_TRACKING.put(tKey, curValue);
+
+            return changed;
+        }
+
+        // 3. 数据库中不存在，视为首次出现，返回 true（有变化）
+        String key = styleKey(r);
+        Map<String, CellStyleSnap> curStyle = buildStyleMap(r);
+        Map<String, String> curValue = buildValueMap(r);
+
+        // 更新内存快照
+        LAST_IMPORT_SNAPSHOT.put(key, curStyle);
+        LAST_VALUE_SNAPSHOT.put(key, curValue);
+        if (r.getExcelRowIndex() != null) {
+            LAST_STYLE_BY_ROW.put(r.getExcelRowIndex(), curStyle);
+            LAST_VALUE_BY_ROW.put(r.getExcelRowIndex(), curValue);
+        }
+        String tKey = (r.getTrackingNumber() == null ? "" : r.getTrackingNumber().toUpperCase(Locale.ROOT));
+        LAST_STYLE_BY_TRACKING.put(tKey, curStyle);
+        LAST_VALUE_BY_TRACKING.put(tKey, curValue);
+
+        return true;
+    }
+
     private final OrderRecordMapper orderRecordMapper;
     private final SettlementService settlementService;
     private final UserSubmissionMapper userSubmissionMapper;
@@ -265,8 +409,9 @@ public class OrderServiceImpl implements OrderService {
                 if (record.getTrackingNumber() != null) {
                     record.setCategory(TrackingCategoryUtil.resolve(record.getTrackingNumber()));
                 }
-                // 基于 Excel 行号的变更检测：内容/格式/颜色 任一变化才写库
-                boolean changed = isRowChangedAndUpdateBaseline(record);
+                // 变更检测（优先使用“运单号+SN”对齐；未命中再按行号以及 tracking 兜底）
+                // 内容/格式/颜色 任一变化才写库；首次见到视为变化
+                boolean changed = isChangedAndUpdateBaseline(record);
                 if (!changed) {
                     skippedUnchanged++;
                     if (record.getExcelRowIndex() != null) skippedRows.add(record.getExcelRowIndex());
