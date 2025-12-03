@@ -95,36 +95,66 @@ public final class ExcelHelper {
             LocalDateTime lastDateTime = null;
             String lastTracking = null;
             int startRow = detectDataStartRow(sheet);
+
+            // ID列固定在第0列
+            int idColumnIndex = 0;
+
             for (int i = startRow; i <= sheet.getLastRowNum(); i++) {
                 Row row = sheet.getRow(i);
                 if (row == null) {
                     continue;
                 }
                 int cellCount = row.getLastCellNum();
-                boolean simpleFormat = cellCount <= 5;
+                // 简单格式：ID, 时间, 运单号, 型号, SN, 备注 (6列)
+                // 复杂格式：ID, 时间, 运单号, 型号, SN, 备注E, 备注F, 金额, 客户名 (9列+)
+                boolean simpleFormat = cellCount <= 6;
                 if (simpleFormat) {
-                    LocalDateTime dateTime = parseDateTime(row.getCell(0));
+                    // 新的列顺序：ID, 时间, 运单号, 型号, SN, 备注
+                    // 读取ID（第0列）
+                    Cell idCell = row.getCell(0);
+                    Long recordId = null;
+                    if (idCell != null && isNumericCell(idCell)) {
+                        long id = (long) idCell.getNumericCellValue();
+                        if (id > 0) {
+                            recordId = id;
+                        }
+                    }
+
+                    // 时间（第1列）
+                    LocalDateTime dateTime = parseDateTime(row.getCell(1));
                     if (dateTime == null) {
                         dateTime = lastDateTime;
                     } else {
                         lastDateTime = dateTime;
                     }
-                    Cell trackingCell = row.getCell(1);
+
+                    // 运单号（第2列）
+                    Cell trackingCell = row.getCell(2);
                     String tracking = normalizeTracking(readString(trackingCell));
                     if (tracking == null || tracking.isBlank()) {
                         tracking = lastTracking;
                     } else {
                         lastTracking = tracking;
                     }
-                    Cell modelCell = row.getCell(2);
-                    Cell snCell = row.getCell(3);
-                    Cell remarkCellE = row.getCell(4);
+
+                    // 型号（第3列）
+                    Cell modelCell = row.getCell(3);
                     String model = readString(modelCell);
+
+                    // SN（第4列）
+                    Cell snCell = row.getCell(4);
                     String sn = readString(snCell);
+
                     if (sn == null || sn.isBlank() || tracking == null || tracking.isBlank()) {
                         continue;
                     }
+
+                    // 备注（第5列），考虑合并单元格
+                    Cell remarkCell = row.getCell(5);
+                    String remark = readMergedAwareString(sheet, i, 5);
+
                     OrderRecord record = new OrderRecord();
+                    record.setId(recordId); // 设置ID
                     record.setOrderTime(dateTime);
                     if (dateTime != null) {
                         record.setOrderDate(dateTime.toLocalDate());
@@ -132,8 +162,7 @@ public final class ExcelHelper {
                     record.setTrackingNumber(tracking);
                     record.setModel(model);
                     record.setSn(sn);
-                    // 备注位于 E 列（简单模板下），考虑合并单元格
-                    record.setRemark(readMergedAwareString(sheet, i, 4));
+                    record.setRemark(remark);
                     // 金额不从 Excel 导入（由结账管理写入）
                     record.setAmount(null);
                     record.setStatus("UNPAID");
@@ -141,42 +170,62 @@ public final class ExcelHelper {
                     record.setCategory(TrackingCategoryUtil.resolve(tracking));
                     record.setCreatedBy(operator);
 
-                    // 样式采集（简单列：B-E -> tracking/model/sn/remark），不处理金额样式；备注样式考虑合并单元格
-                    Cell remarkStyleCell = mergedTopLeftCell(sheet, i, 4);
+                    // 样式采集（列：C-F -> tracking/model/sn/remark），不处理金额样式；备注样式考虑合并单元格
+                    Cell remarkStyleCell = mergedTopLeftCell(sheet, i, 5);
                     applyCellStyleToRecord(record, trackingCell, modelCell, snCell, null, remarkStyleCell);
 
                     // 行号基准（用于位置对齐）
                     record.setExcelRowIndex(i - startRow);
-                    record.setExcelRowIndex(i - startRow);
+
                     result.add(record);
                 } else {
-                    LocalDateTime dateTime = parseDateTime(row.getCell(0));
+                    // 复杂格式：ID, 时间, 运单号, 型号, SN, 备注E, 备注F, 金额, 客户名
+                    // 读取ID（第0列）
+                    Cell idCell = row.getCell(0);
+                    Long recordId = null;
+                    if (idCell != null && isNumericCell(idCell)) {
+                        long id = (long) idCell.getNumericCellValue();
+                        if (id > 0) {
+                            recordId = id;
+                        }
+                    }
+
+                    // 时间（第1列）
+                    LocalDateTime dateTime = parseDateTime(row.getCell(1));
                     if (dateTime == null) {
                         dateTime = lastDateTime;
                     } else {
                         lastDateTime = dateTime;
                     }
-                    Cell trackingCell = row.getCell(1);
+
+                    // 运单号（第2列）
+                    Cell trackingCell = row.getCell(2);
                     String tracking = normalizeTracking(readString(trackingCell));
                     if (tracking == null || tracking.isBlank()) {
                         tracking = lastTracking;
                     } else {
                         lastTracking = tracking;
                     }
+
+                    // 型号（第3列）
+                    Cell modelCell = row.getCell(3);
+
+                    // SN（第4列）
+                    Cell snCell = row.getCell(4);
+
+                    // 备注在第5和第6列，合并写入 remark（合并单元格兼容）
+                    String remarkE = readMergedAwareString(sheet, i, 5);
+                    String remarkF = readMergedAwareString(sheet, i, 6);
+                    String mergedRemark = (remarkE == null || remarkE.isBlank()) ? (remarkF == null ? null : remarkF)
+                                          : (remarkF == null || remarkF.isBlank() ? remarkE : (remarkE + " " + remarkF));
+
                     OrderRecord record = new OrderRecord();
+                    record.setId(recordId); // 设置ID
                     if (dateTime != null) {
                         record.setOrderTime(dateTime);
                         record.setOrderDate(dateTime.toLocalDate());
                     }
                     record.setTrackingNumber(tracking);
-                    Cell modelCell = row.getCell(2);
-                    Cell snCell = row.getCell(3);
-                    // 备注在 E 和 F 列，合并写入 remark（合并单元格兼容）
-                    String remarkE = readMergedAwareString(sheet, i, 4);
-                    String remarkF = readMergedAwareString(sheet, i, 5);
-                    String mergedRemark = (remarkE == null || remarkE.isBlank()) ? (remarkF == null ? null : remarkF)
-                                          : (remarkF == null || remarkF.isBlank() ? remarkE : (remarkE + " " + remarkF));
-
                     record.setModel(readString(modelCell));
                     record.setSn(readString(snCell));
                     record.setRemark(mergedRemark);
@@ -188,7 +237,8 @@ public final class ExcelHelper {
                     record.setAmount(null);
                     record.setCurrency("CNY");
                     record.setCreatedBy(operator);
-                    record.setCustomerName(readString(row.getCell(8)));
+                    record.setCustomerName(readString(row.getCell(9))); // 客户名在第9列
+
                     if (record.getTrackingNumber() == null || record.getTrackingNumber().isBlank()) {
                         continue;
                     }
@@ -196,12 +246,13 @@ public final class ExcelHelper {
                         continue;
                     }
 
-                    // 样式采集：备注优先取 F 列样式，否则取 E 列；备注样式考虑合并单元格顶格单元
-                    Cell remarkStyleCell = mergedTopLeftCell(sheet, i, 5);
-                    if (remarkStyleCell == null) remarkStyleCell = mergedTopLeftCell(sheet, i, 4);
+                    // 样式采集：备注优先取第6列样式，否则取第5列；备注样式考虑合并单元格顶格单元
+                    Cell remarkStyleCell = mergedTopLeftCell(sheet, i, 6);
+                    if (remarkStyleCell == null) remarkStyleCell = mergedTopLeftCell(sheet, i, 5);
                     applyCellStyleToRecord(record, trackingCell, modelCell, snCell, null, remarkStyleCell);
 
                     record.setExcelRowIndex(i - startRow);
+
                     result.add(record);
                 }
             }
@@ -774,7 +825,7 @@ public static byte[] writeSettlements(List<SettlementRecord> records) throws IOE
             String text = readString(cell, null);
             if (text == null) continue;
             String t = text.trim().toLowerCase(Locale.ROOT);
-            if (t.equals("日期") || t.equals("时间") || t.equals("下单日期") || t.equals("下单时间")
+            if (t.equals("id") || t.equals("日期") || t.equals("时间") || t.equals("下单日期") || t.equals("下单时间")
                 || t.equals("单号") || t.equals("运单号") || t.equals("型号") || t.equals("sn")
                 || t.equals("备注") || t.equals("金额") || t.equals("状态") || t.equals("物流") || t.equals("分类")) {
                 headerScore++;
@@ -797,5 +848,80 @@ public static byte[] writeSettlements(List<SettlementRecord> records) throws IOE
         return cell.getCellType() == org.apache.poi.ss.usermodel.CellType.ERROR
             || (cell.getCellType() == org.apache.poi.ss.usermodel.CellType.FORMULA
             && cell.getCachedFormulaResultType() == org.apache.poi.ss.usermodel.CellType.ERROR);
+    }
+
+    /**
+     * 导出订单记录到Excel，包含ID列
+     */
+    public static byte[] writeOrders(List<OrderRecord> records) throws IOException {
+        try (Workbook workbook = new XSSFWorkbook(); ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
+            Sheet sheet = workbook.createSheet("订单数据");
+
+            // 表头（ID作为第一列）
+            Row header = sheet.createRow(0);
+            header.createCell(0).setCellValue("ID");
+            header.createCell(1).setCellValue("时间");
+            header.createCell(2).setCellValue("运单号");
+            header.createCell(3).setCellValue("型号");
+            header.createCell(4).setCellValue("SN");
+            header.createCell(5).setCellValue("备注");
+            header.createCell(6).setCellValue("金额");
+            header.createCell(7).setCellValue("状态");
+
+            int rowIndex = 1;
+            for (OrderRecord record : records) {
+                Row row = sheet.createRow(rowIndex++);
+
+                // ID（第一列）
+                if (record.getId() != null) {
+                    row.createCell(0).setCellValue(record.getId());
+                }
+
+                // 时间（第二列）
+                if (record.getOrderTime() != null) {
+                    row.createCell(1).setCellValue(record.getOrderTime().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")));
+                } else if (record.getOrderDate() != null) {
+                    row.createCell(1).setCellValue(record.getOrderDate().format(DATE_FORMATTER));
+                } else {
+                    row.createCell(1).setCellValue("");
+                }
+
+                // 运单号（第三列）
+                row.createCell(2).setCellValue(record.getTrackingNumber() == null ? "" : record.getTrackingNumber());
+
+                // 型号（第四列）
+                row.createCell(3).setCellValue(record.getModel() == null ? "" : record.getModel());
+
+                // SN（第五列）
+                row.createCell(4).setCellValue(record.getSn() == null ? "" : record.getSn());
+
+                // 备注（第六列）
+                row.createCell(5).setCellValue(record.getRemark() == null ? "" : record.getRemark());
+
+                // 金额（第七列）
+                if (record.getAmount() != null) {
+                    row.createCell(6).setCellValue(record.getAmount().doubleValue());
+                } else {
+                    row.createCell(6).setCellValue("");
+                }
+
+                // 状态（第八列）
+                String status = "";
+                if ("UNPAID".equals(record.getStatus())) {
+                    status = "未打款";
+                } else if ("PAID".equals(record.getStatus())) {
+                    status = "已打款";
+                }
+                row.createCell(7).setCellValue(status);
+            }
+
+            // 自动列宽
+            for (int c = 0; c <= 7; c++) {
+                sheet.autoSizeColumn(c);
+            }
+
+            workbook.write(baos);
+            return baos.toByteArray();
+        }
     }
 }

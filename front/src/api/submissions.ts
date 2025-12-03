@@ -3,7 +3,7 @@ import type {
   UserSubmission,
   UserSubmissionCreateRequest,
   UserSubmissionBatchRequest,
-  SubmissionQueryParams,
+  UserSubmissionQueryRequest,
   PageResponse,
   UserSubmissionLog,
   SubmissionLogQueryRequest
@@ -15,10 +15,10 @@ export const submitUserSubmission = (payload: UserSubmissionCreateRequest) =>
 export const submitUserSubmissionsBatch = (payload: UserSubmissionBatchRequest) =>
   apiClient.post<UserSubmission[]>('/user-submissions/batch', payload);
 
-export const fetchMySubmissions = (params: SubmissionQueryParams) =>
+export const fetchMySubmissions = (params: UserSubmissionQueryRequest) =>
   apiClient.get<any>('/user-submissions/mine', { params });
 
-export const fetchAllSubmissions = (params: SubmissionQueryParams) =>
+export const fetchAllSubmissions = (params: UserSubmissionQueryRequest) =>
   apiClient.get<any>('/user-submissions', { params });
 
 export const listOwnerUsernames = (params?: any) =>

@@ -56,24 +56,40 @@
                                   -- 已移除唯一约束 uk_order_tracking_sn，允许重复数据
                                   INDEX idx_order_date(order_date),  -- 索引提高查询速度
                                   INDEX idx_order_status(status),    -- 索引提高查询速度
-                                  INDEX idx_order_sn(sn)             -- SN 查询索引
+                                  INDEX idx_order_sn(sn),            -- SN 查询索引
+                                  INDEX idx_order_tracking(tracking_number), -- 运单号查询索引
+                                  FULLTEXT KEY ft_order_keyword (tracking_number, sn, model) -- 全文索引用于关键字搜索
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-    -- 订单单元格样式表（持久化导入时的B~F列样式）
+#     -- 订单单元格样式表（持久化导入时的B~F列样式）
+#     CREATE TABLE IF NOT EXISTS order_cell_style (
+#         id           BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+#         order_id     BIGINT UNSIGNED NOT NULL,
+#         field        VARCHAR(16)     NOT NULL, -- tracking|model|sn|amount|remark
+#         bg_color     VARCHAR(16),
+#         font_color   VARCHAR(16),
+#         strike       TINYINT         NOT NULL DEFAULT 0,
+#         created_at   DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+#         updated_at   DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+#         INDEX idx_style_order(order_id),
+#         UNIQUE KEY uk_style_order_field(order_id, field),
+#         CONSTRAINT fk_style_order FOREIGN KEY (order_id) REFERENCES order_record(id) ON DELETE CASCADE
+#     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     CREATE TABLE IF NOT EXISTS order_cell_style (
-        id           BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
-        order_id     BIGINT UNSIGNED NOT NULL,
-        field        VARCHAR(16)     NOT NULL, -- tracking|model|sn|amount|remark
-        bg_color     VARCHAR(16),
-        font_color   VARCHAR(16),
-        strike       TINYINT         NOT NULL DEFAULT 0,
-        created_at   DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        updated_at   DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        INDEX idx_style_order(order_id),
-        UNIQUE KEY uk_style_order_field(order_id, field),
-        CONSTRAINT fk_style_order FOREIGN KEY (order_id) REFERENCES order_record(id) ON DELETE CASCADE
+                                                    id           BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                                                    order_id     BIGINT UNSIGNED NULL,     -- 允许为空，避免外键错误
+                                                    field        VARCHAR(16)     NOT NULL,
+                                                    bg_color     VARCHAR(16),
+                                                    font_color   VARCHAR(16),
+                                                    strike       TINYINT         NOT NULL DEFAULT 0,
+                                                    created_at   DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                                                    updated_at   DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                                                    INDEX idx_style_order(order_id),
+                                                    UNIQUE KEY uk_style_order_field(order_id, field),
+                                                    CONSTRAINT fk_style_order FOREIGN KEY (order_id)
+                                                        REFERENCES order_record(id)
+                                                        ON DELETE SET NULL       -- 删除订单时只把样式置空，不报错
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
     -- 用户提交单号表
     CREATE TABLE user_submission (
                                      id               BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,

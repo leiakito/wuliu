@@ -25,7 +25,7 @@ const routes = [
                 path: 'orders',
                 name: 'orders', //权限限制页面,只要roles 管理员才可以访问
                 component: () => import('@/views/OrdersView.vue'),
-                meta: { requiresAuth: true, title: '物流单号', roles: ['ADMIN'] }
+                meta: { requiresAuth: true, title: '物流单号', roles: ['ADMIN'], keepAlive: true }
             },
             {
                 path: 'user-submissions',
@@ -76,15 +76,31 @@ const routes = [
         redirect: '/dashboard'
     }
 ];
+const scrollPositions = new Map();
 //创建Router实例, 控制跳转 监听变化,使用导航卫士💂
 const router = createRouter({
     history: createWebHistory(),
-    routes
+    routes,
+    scrollBehavior(to, from, savedPosition) {
+        if (savedPosition)
+            return savedPosition;
+        const pos = scrollPositions.get(to.path);
+        if (typeof pos === 'number') {
+            return { left: 0, top: pos };
+        }
+        return { left: 0, top: 0 };
+    }
 });
 //鉴权、避免已登录用户再进登录页、按角色限制访问
 //全局路由守卫（核心权限控制）
 //每次路由跳转前都会执行
-router.beforeEach((to, _from, next) => {
+router.beforeEach((to, from, next) => {
+    try {
+        if (typeof window !== 'undefined') {
+            scrollPositions.set(from.path, window.scrollY || window.pageYOffset || 0);
+        }
+    }
+    catch { }
     const auth = useAuthStore(); //获取登陆状态 是否登陆 角色 token 
     const requiresAuth = to.matched.some(record => record.meta.requiresAuth); //算是否需要登录：读取目标路由的 meta.requiresAuth
     //未登录跳转登录页

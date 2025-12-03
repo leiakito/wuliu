@@ -53,6 +53,7 @@ com/example/demo/settlement/entity/SettlementRecord.class
 com/example/demo/submission/entity/UserSubmission.class
 com/example/demo/config/MybatisPlusConfig.class
 com/example/demo/order/entity/OrderCellStyle.class
+com/example/demo/order/service/impl/OrderServiceImpl$Snapshot.class
 com/example/demo/settlement/dto/SettlementCursorRequest.class
 com/example/demo/common/annotation/LogOperation.class
 com/example/demo/submission/service/impl/UserSubmissionLogServiceImpl.class

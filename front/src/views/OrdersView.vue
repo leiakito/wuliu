@@ -95,6 +95,55 @@
 
     </div>
 
+    <!-- 数据变更提醒列表 -->
+    <el-card v-if="isAdmin && diffNotices.length > 0" class="diff-notice-card">
+      <template #header>
+        <div class="diff-notice-header">
+          <div class="header-left">
+            <i class="el-icon-warning-filled" style="color: #f59e0b; font-size: 18px;"></i>
+            <span class="header-title">数据变更提醒</span>
+            <el-tag type="warning" size="small">{{ diffNotices.length }} 条</el-tag>
+          </div>
+          <div class="header-actions">
+            <el-button size="small" @click="exportDiffNotices">导出变更</el-button>
+            <el-button size="small" type="danger" @click="clearDiffNotices">清空提醒</el-button>
+          </div>
+        </div>
+      </template>
+
+      <el-table :data="diffNotices" size="small" max-height="300">
+        <el-table-column prop="trackingNumber" label="运单号" width="160" />
+        <el-table-column label="变更字段" width="200">
+          <template #default="{ row }">
+            <el-tag
+              v-for="field in diffFields(row)"
+              :key="field"
+              type="warning"
+              size="small"
+              style="margin-right: 4px;"
+            >
+              {{ field }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="变更详情">
+          <template #default="{ row }">
+            <div class="diff-details">
+              <div
+                v-for="field in diffFields(row)"
+                :key="field"
+                class="diff-item"
+              >
+                <span class="field-name">{{ field }}:</span>
+                <span class="old-value">{{ formatDiffValue(row.before, field) }}</span>
+                <span class="arrow">→</span>
+                <span class="new-value">{{ formatDiffValue(row.after, field) }}</span>
+              </div>
+            </div>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-card>
 
     <el-card class="table-card">
       <el-table
@@ -319,6 +368,27 @@ interface FilterModel {
   sortOrder?: string;
 }
 
+interface DiffNotice {
+  trackingNumber: string;
+  message: string;
+  before?: Partial<OrderRecord>;
+  after?: Partial<OrderRecord>;
+  ts?: number;
+}
+
+interface StyleChangeItem {
+  trackingNumber: string;
+  sn: string;
+  field: 'tracking' | 'model' | 'sn' | 'amount' | 'remark';
+  fromBg?: string;
+  toBg?: string;
+  fromFont?: string;
+  toFont?: string;
+  fromStrike: boolean;
+  toStrike: boolean;
+  ts: number;
+}
+
 const statusOptions = [
   { label: '未打款', value: 'UNPAID', tag: 'danger' },
   { label: '已打款', value: 'PAID', tag: 'success' }
@@ -388,6 +458,9 @@ const orders = ref<OrderRecord[]>([]);
 const userOrders = ref<OrderRecord[]>([]);
 const total = ref(0);
 const loading = ref(false);
+
+// 差异提醒列表
+const diffNotices = ref<DiffNotice[]>([]);
 
 
 
@@ -716,9 +789,56 @@ const triggerImport = () => {
 
 
 
+// 获取所有订单(不分页)
+const fetchAllOrders = async (): Promise<OrderRecord[]> => {
+  try {
+    const data = await fetchOrders({ page: 1, size: 999999 });
+    return data.records || [];
+  } catch (error) {
+    console.error('Failed to fetch all orders:', error);
+    return [];
+  }
+};
+
 const captureDiffSnapshot = async () => {
   const all = await fetchAllOrders();
   return buildOrderSnapshot(all);
+};
+
+// 合并差异提醒
+const mergeDiffNotices = (newNotices: DiffNotice[]) => {
+  console.log('🔄 合并差异提醒，新增:', newNotices.length, '条');
+  if (!newNotices.length) {
+    console.log('⚠️ 没有新的差异提醒');
+    return;
+  }
+
+  const existing = new Map<string, DiffNotice>();
+  diffNotices.value.forEach(item => {
+    // 使用记录ID作为键的一部分，确保每条记录的变更都能保留
+    const recordId = (item.after as any)?.id || (item.before as any)?.id;
+    const key = recordId ? `ID-${recordId}` : `${(item.trackingNumber || '').toUpperCase()}-${item.message}`;
+    console.log('📌 现有提醒键:', key);
+    existing.set(key, item);
+  });
+
+  newNotices.forEach(item => {
+    // 使用记录ID作为键的一部分，确保每条记录的变更都能保留
+    const recordId = (item.after as any)?.id || (item.before as any)?.id;
+    const key = recordId ? `ID-${recordId}` : `${(item.trackingNumber || '').toUpperCase()}-${item.message}`;
+    console.log('📌 新增提醒键:', key, '运单号:', item.trackingNumber, '变更:', item.message);
+    item.ts = Date.now();
+    existing.set(key, item);
+  });
+
+  diffNotices.value = Array.from(existing.values()).sort((a, b) => (b.ts || 0) - (a.ts || 0));
+  console.log('✅ 合并完成，当前共有', diffNotices.value.length, '条差异提醒');
+};
+
+// 清空差异提醒
+const clearDiffNotices = () => {
+  diffNotices.value = [];
+  ElMessage.success('已清空变更提醒');
 };
 
 const startImportProgress = () => {
@@ -751,6 +871,16 @@ const handleFileChange = async (event: Event) => {
   const target = event.target as HTMLInputElement;
   const file = target.files?.[0];
   if (!file) return;
+
+  // 导入前捕获旧数据快照
+  let prevSnapshot: Map<number, Partial<OrderRecord>> | undefined;
+  try {
+    prevSnapshot = await captureDiffSnapshot();
+    console.log('📸 捕获快照成功，共', prevSnapshot.size, '条记录');
+  } catch (error) {
+    console.warn('Failed to capture snapshot:', error);
+  }
+
   startImportProgress();
   try {
     const report: any = await importOrders(file);
@@ -760,7 +890,7 @@ const handleFileChange = async (event: Event) => {
       const styles: ImportStyle[] = report?.styles || [];
       const map = new Map<string, ImportStyle>();
       styles.forEach(s => {
-        // 仅按记录ID缓存样式，避免同一tracking+SN的其他旧记录被新样式“覆盖显示”
+        // 仅按记录ID缓存样式，避免同一tracking+SN的其他旧记录被新样式"覆盖显示"
         if ((s as any).id) {
           map.set(`ID-${(s as any).id}`, s);
         }
@@ -779,7 +909,21 @@ const handleFileChange = async (event: Event) => {
       duration: 8000, // 显示更久
       showClose: true
     });
-    loadOrders();
+
+    // 重新加载订单并计算差异
+    await loadOrders();
+
+    // 导入后计算差异
+    if (prevSnapshot) {
+      try {
+        console.log('🔍 开始计算差异...');
+        const latest = await fetchAllOrders();
+        console.log('📦 获取最新数据成功，共', latest.length, '条记录');
+        scheduleDiffCalculation(prevSnapshot, latest, importStyles.value);
+      } catch (error) {
+        console.warn('Failed to calculate differences:', error);
+      }
+    }
   } catch (error) {
     finishImportProgress();
     throw error;
@@ -854,15 +998,18 @@ const formatDateTime = (value?: string) => {
 };
 
 const buildOrderSnapshot = (list: OrderRecord[]) => {
-  const map = new Map<string, Partial<OrderRecord>>();
+  // 使用 ID 作为 key，这样即使运单号、SN等所有字段都改了，也能通过ID匹配到同一条记录
+  const map = new Map<number, Partial<OrderRecord>>();
   list.forEach(item => {
-    const key = buildOrderKey(item);
-    if (!key) return;
-    map.set(key, {
+    if (!item.id) return; // 没有ID的记录跳过
+
+    map.set(item.id, {
+      id: item.id,
       trackingNumber: item.trackingNumber,
       model: item.model,
       sn: item.sn,
       amount: item.amount,
+      remark: item.remark,
       // 包含样式信息
       modelBgColor: (item as any).modelBgColor,
       modelFontColor: (item as any).modelFontColor,
@@ -878,21 +1025,48 @@ const buildOrderSnapshot = (list: OrderRecord[]) => {
       remarkStrike: (item as any).remarkStrike
     });
   });
+  console.log('📸 快照已建立，共', map.size, '条记录（按ID索引）');
   return map;
 };
 
-const computeDifferences = (prevMap: Map<string, Partial<OrderRecord>>, nextList: OrderRecord[], importedStyles?: Map<string, ImportStyle>) => {
-  if (!prevMap.size) return [];
+const computeDifferences = (prevMap: Map<number, Partial<OrderRecord>>, nextList: OrderRecord[], importedStyles?: Map<string, ImportStyle>) => {
+  console.log('🔎 computeDifferences 被调用，prevMap.size:', prevMap.size, 'nextList.length:', nextList.length);
+  if (!prevMap.size) {
+    console.log('⚠️ prevMap 为空，返回空数组');
+    return [];
+  }
   const fieldLabels: Record<string, string> = {
     trackingNumber: '运单号',
     model: '型号',
-    sn: 'SN'
+    sn: 'SN',
+    amount: '金额',
+    remark: '备注'
   };
   const notices: { trackingNumber: string; message: string; before?: Partial<OrderRecord>; after?: Partial<OrderRecord> }[] = [];
+
+  // 遍历新记录，通过ID匹配旧记录
   nextList.forEach(order => {
-    const key = buildOrderKey(order);
-    const prev = prevMap.get(key);
+    if (!order.id) {
+      console.log('⚠️ 记录没有ID，跳过:', order.trackingNumber);
+      return;
+    }
+
+    const prev = prevMap.get(order.id);
     if (!prev) {
+      console.log('⚠️ 未找到旧记录，ID:', order.id, '运单号:', order.trackingNumber, '(这是新增的记录)');
+      // 新增的记录也显示出来
+      notices.push({
+        trackingNumber: order.trackingNumber || `ID-${order.id}`,
+        message: '🆕 新增记录',
+        before: {},
+        after: {
+          trackingNumber: order.trackingNumber,
+          model: order.model,
+          sn: order.sn,
+          amount: order.amount,
+          remark: order.remark
+        }
+      });
       return;
     }
     const changed: string[] = [];
@@ -908,7 +1082,20 @@ const computeDifferences = (prevMap: Map<string, Partial<OrderRecord>>, nextList
     Object.keys(fieldLabels).forEach(field => {
       const prevVal = (prev as any)[field];
       const currVal = (order as any)[field];
-      if (normalizeVal(prevVal) !== normalizeVal(currVal)) {
+      const prevNorm = normalizeVal(prevVal);
+      const currNorm = normalizeVal(currVal);
+
+      // 详细日志：显示所有字段的比较结果
+      console.log(`📊 比较字段 [ID:${order.id}] ${fieldLabels[field]}:`, {
+        旧值: prevVal,
+        新值: currVal,
+        旧值标准化: prevNorm,
+        新值标准化: currNorm,
+        是否相同: prevNorm === currNorm
+      });
+
+      if (prevNorm !== currNorm) {
+        console.log(`🔄 发现变化 [ID:${order.id}] ${fieldLabels[field]}: "${prevVal}" → "${currVal}"`);
         changed.push(fieldLabels[field]);
         (before as any)[field] = prevVal;
         (after as any)[field] = currVal;
@@ -946,22 +1133,16 @@ const computeDifferences = (prevMap: Map<string, Partial<OrderRecord>>, nextList
     
     if (changed.length) {
       notices.push({
-        trackingNumber: order.trackingNumber ?? key,
+        trackingNumber: order.trackingNumber || `ID-${order.id}`,
         message: `字段变更：${changed.join('、')}`,
         before,
         after
       });
     }
   });
-  // 同一运单号只保留一条提醒
-  const dedup: Record<string, typeof notices[number]> = {};
-  notices.forEach(item => {
-    const k = (item.trackingNumber ?? '').toUpperCase();
-    if (!dedup[k]) {
-      dedup[k] = item;
-    }
-  });
-  return Object.values(dedup).slice(0, 20); // 避免一次性展示过多
+
+  console.log('✅ 差异检测完成，共发现', notices.length, '条变更');
+  return notices;
 };
 
 
@@ -995,24 +1176,37 @@ const formatDiffValue = (obj: Partial<OrderRecord> | undefined, label: string) =
   const map: Record<string, keyof OrderRecord> = {
     '运单号': 'trackingNumber',
     '型号': 'model',
-    'SN': 'sn'
+    'SN': 'sn',
+    '金额': 'amount',
+    '备注': 'remark'
   };
   const key = map[label];
   const val = key ? (obj as any)[key] : undefined;
-  return val === undefined || val === null || val === '' ? '-' : val;
+
+  // 格式化金额
+  if (label === '金额' && typeof val === 'number') {
+    return `￥${val.toFixed(2)}`;
+  }
+
+  return val === undefined || val === null || val === '' ? '-' : String(val);
 };
 
-const scheduleDiffCalculation = (prevSnapshot: Map<string, Partial<OrderRecord>>, latest: OrderRecord[], importedStyles?: Map<string, ImportStyle>) => {
+const scheduleDiffCalculation = (prevSnapshot: Map<number, Partial<OrderRecord>>, latest: OrderRecord[], importedStyles?: Map<string, ImportStyle>) => {
   // 轻量异步排队，避免阻塞后续操作或导航
   setTimeout(() => {
+    console.log('⚙️ 开始计算差异，快照:', prevSnapshot.size, '最新:', latest.length);
     const diffs = computeDifferences(prevSnapshot, latest, importedStyles);
+    console.log('📋 发现差异:', diffs.length, '条');
+    if (diffs.length > 0) {
+      console.log('差异详情:', diffs);
+    }
     mergeDiffNotices(diffs);
   }, 0);
 };
 
 // 将导入报告中的样式直接转为变更项（即使后端未保存该行，也能展示出来）
 const materializeImportedStyleChanges = (
-  prevMap: Map<string, Partial<OrderRecord>>,
+  prevMap: Map<number, Partial<OrderRecord>>,
   importedStyles?: Map<string, ImportStyle>
 ): StyleChangeItem[] => {
   if (!importedStyles || !importedStyles.size) return [];
@@ -1060,7 +1254,7 @@ const materializeImportedStyleChanges = (
 
 // 计算样式变更：前端兜底生成（防止后端只返回部分变更）
 const computeStyleChanges = (
-  prevMap: Map<string, Partial<OrderRecord>>,
+  prevMap: Map<number, Partial<OrderRecord>>,
   nextList: OrderRecord[],
   importedStyles?: Map<string, ImportStyle>
 ): StyleChangeItem[] => {
@@ -1818,5 +2012,76 @@ onBeforeUnmount(() => {
 .arrow {
   color: #909399;
   font-size: 12px;
+}
+
+/* 数据变更提醒卡片 */
+.diff-notice-card {
+  margin: 16px 0;
+  background: #fffbf0;
+  border: 2px solid #f59e0b;
+  box-shadow: 0 4px 12px rgba(245, 158, 11, 0.15);
+}
+
+.diff-notice-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.header-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #d97706;
+}
+
+.header-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.diff-details {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.diff-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.field-name {
+  font-weight: 600;
+  color: #374151;
+  min-width: 60px;
+}
+
+.old-value {
+  color: #ef4444;
+  text-decoration: line-through;
+  background: #fee;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.new-value {
+  color: #10b981;
+  font-weight: 600;
+  background: #d1fae5;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.diff-item .arrow {
+  color: #f59e0b;
+  font-weight: bold;
 }
 </style>

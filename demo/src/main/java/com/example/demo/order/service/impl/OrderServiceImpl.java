@@ -33,6 +33,11 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
+import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import org.springframework.transaction.annotation.Transactional;
 import lombok.Data;
 import org.springframework.util.CollectionUtils;
@@ -43,15 +48,51 @@ import org.springframework.web.multipart.MultipartFile;
 @RequiredArgsConstructor
 public class OrderServiceImpl implements OrderService {
 
-    // 会话级：上一次导入的样式与内容快照（仅用于与本次导入对比，不使用数据库样式）
-    private static final Map<String, Map<String, CellStyleSnap>> LAST_IMPORT_SNAPSHOT = new ConcurrentHashMap<>();
-    private static final Map<String, Map<String, String>> LAST_VALUE_SNAPSHOT = new ConcurrentHashMap<>();
-    // 位置对齐（行号）
-    private static final Map<Integer, Map<String, CellStyleSnap>> LAST_STYLE_BY_ROW = new ConcurrentHashMap<>();
-    private static final Map<Integer, Map<String, String>> LAST_VALUE_BY_ROW = new ConcurrentHashMap<>();
-    // tracking 兜底
-    private static final Map<String, Map<String, CellStyleSnap>> LAST_STYLE_BY_TRACKING = new ConcurrentHashMap<>();
-    private static final Map<String, Map<String, String>> LAST_VALUE_BY_TRACKING = new ConcurrentHashMap<>();
+    // 会话级快照采用“按用户隔离”的方式，避免多用户串数据
+    private static final Map<String, Snapshot> SNAPSHOT_BY_USER = new ConcurrentHashMap<>();
+
+    private static class Snapshot {
+        volatile long lastAccess = System.currentTimeMillis();
+        final Map<String, Map<String, CellStyleSnap>> LAST_IMPORT_SNAPSHOT = new ConcurrentHashMap<>();
+        final Map<String, Map<String, String>> LAST_VALUE_SNAPSHOT = new ConcurrentHashMap<>();
+        final Map<Integer, Map<String, CellStyleSnap>> LAST_STYLE_BY_ROW = new ConcurrentHashMap<>();
+        final Map<Integer, Map<String, String>> LAST_VALUE_BY_ROW = new ConcurrentHashMap<>();
+        final Map<String, Map<String, CellStyleSnap>> LAST_STYLE_BY_TRACKING = new ConcurrentHashMap<>();
+        final Map<String, Map<String, String>> LAST_VALUE_BY_TRACKING = new ConcurrentHashMap<>();
+        void touch() { this.lastAccess = System.currentTimeMillis(); }
+    }
+
+    private static Snapshot snaps(String operator) {
+        String key = (operator == null || operator.isBlank()) ? "__ANON__" : operator.trim();
+        Snapshot s = SNAPSHOT_BY_USER.computeIfAbsent(key, k -> new Snapshot());
+        s.touch();
+        return s;
+    }
+
+    private static final long SNAPSHOT_TTL_MILLIS = TimeUnit.HOURS.toMillis(2);
+    private ScheduledExecutorService snapshotCleaner;
+
+    @PostConstruct
+    private void startSnapshotCleaner() {
+        snapshotCleaner = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "order-snapshot-cleaner");
+            t.setDaemon(true);
+            return t;
+        });
+        snapshotCleaner.scheduleAtFixedRate(this::cleanupSnapshots, 30, 30, TimeUnit.MINUTES);
+    }
+
+    @PreDestroy
+    private void stopSnapshotCleaner() {
+        if (snapshotCleaner != null) {
+            snapshotCleaner.shutdownNow();
+        }
+    }
+
+    private void cleanupSnapshots() {
+        long now = System.currentTimeMillis();
+        SNAPSHOT_BY_USER.entrySet().removeIf(entry -> now - entry.getValue().lastAccess > SNAPSHOT_TTL_MILLIS);
+    }
 
     @Data
     private static class CellStyleSnap {
@@ -64,7 +105,7 @@ public class OrderServiceImpl implements OrderService {
 
     private String styleKey(OrderRecord r) {
         return ((r.getTrackingNumber() == null ? "" : r.getTrackingNumber()).toUpperCase(Locale.ROOT)) + "#" +
-               ((r.getSn() == null ? "" : r.getSn()).toUpperCase(Locale.ROOT));
+                ((r.getSn() == null ? "" : r.getSn()).toUpperCase(Locale.ROOT));
     }
 
     private Map<String, CellStyleSnap> buildStyleMap(OrderRecord r) {
@@ -90,37 +131,37 @@ public class OrderServiceImpl implements OrderService {
         // 从持久化的样式表读取，如果没有则使用默认值
         OrderCellStyle trackingStyle = styleMap.get("tracking");
         m.put("tracking", new CellStyleSnap(
-            trackingStyle != null ? norm(trackingStyle.getBgColor()) : norm(null),
-            trackingStyle != null ? norm(trackingStyle.getFontColor()) : norm(null),
-            trackingStyle != null ? bool(trackingStyle.getStrike()) : Boolean.FALSE
+                trackingStyle != null ? norm(trackingStyle.getBgColor()) : norm(null),
+                trackingStyle != null ? norm(trackingStyle.getFontColor()) : norm(null),
+                trackingStyle != null ? bool(trackingStyle.getStrike()) : Boolean.FALSE
         ));
 
         OrderCellStyle modelStyle = styleMap.get("model");
         m.put("model", new CellStyleSnap(
-            modelStyle != null ? norm(modelStyle.getBgColor()) : norm(null),
-            modelStyle != null ? norm(modelStyle.getFontColor()) : norm(null),
-            modelStyle != null ? bool(modelStyle.getStrike()) : Boolean.FALSE
+                modelStyle != null ? norm(modelStyle.getBgColor()) : norm(null),
+                modelStyle != null ? norm(modelStyle.getFontColor()) : norm(null),
+                modelStyle != null ? bool(modelStyle.getStrike()) : Boolean.FALSE
         ));
 
         OrderCellStyle snStyle = styleMap.get("sn");
         m.put("sn", new CellStyleSnap(
-            snStyle != null ? norm(snStyle.getBgColor()) : norm(null),
-            snStyle != null ? norm(snStyle.getFontColor()) : norm(null),
-            snStyle != null ? bool(snStyle.getStrike()) : Boolean.FALSE
+                snStyle != null ? norm(snStyle.getBgColor()) : norm(null),
+                snStyle != null ? norm(snStyle.getFontColor()) : norm(null),
+                snStyle != null ? bool(snStyle.getStrike()) : Boolean.FALSE
         ));
 
         OrderCellStyle remarkStyle = styleMap.get("remark");
         m.put("remark", new CellStyleSnap(
-            remarkStyle != null ? norm(remarkStyle.getBgColor()) : norm(null),
-            remarkStyle != null ? norm(remarkStyle.getFontColor()) : norm(null),
-            remarkStyle != null ? bool(remarkStyle.getStrike()) : Boolean.FALSE
+                remarkStyle != null ? norm(remarkStyle.getBgColor()) : norm(null),
+                remarkStyle != null ? norm(remarkStyle.getFontColor()) : norm(null),
+                remarkStyle != null ? bool(remarkStyle.getStrike()) : Boolean.FALSE
         ));
 
         OrderCellStyle amountStyle = styleMap.get("amount");
         m.put("amount", new CellStyleSnap(
-            amountStyle != null ? norm(amountStyle.getBgColor()) : norm(null),
-            amountStyle != null ? norm(amountStyle.getFontColor()) : norm(null),
-            amountStyle != null ? bool(amountStyle.getStrike()) : Boolean.FALSE
+                amountStyle != null ? norm(amountStyle.getBgColor()) : norm(null),
+                amountStyle != null ? norm(amountStyle.getFontColor()) : norm(null),
+                amountStyle != null ? bool(amountStyle.getStrike()) : Boolean.FALSE
         ));
 
         return m;
@@ -139,21 +180,22 @@ public class OrderServiceImpl implements OrderService {
 
     // 与上一次导入快照对比（混合对齐：先 key(运单号+SN)，未命中则按行号），
     // 只返回一条记录级提示（选择第一个发生变化的列）；比较“格式变化 或 内容变化”。
-    private Optional<Map<String, Object>> compareWithSessionSnapshot(OrderRecord r) {
+    private Optional<Map<String, Object>> compareWithSessionSnapshot(OrderRecord r, String operator) {
+        Snapshot s = snaps(operator);
         String key = styleKey(r);
         Map<String, CellStyleSnap> curStyle = buildStyleMap(r);
         Map<String, String> curValue = buildValueMap(r);
 
         List<String> order = Arrays.asList("tracking","model","sn","remark","amount");
 
-        Map<String, CellStyleSnap> prevStyle = LAST_IMPORT_SNAPSHOT.get(key);
-        Map<String, String> prevValue = LAST_VALUE_SNAPSHOT.get(key);
+        Map<String, CellStyleSnap> prevStyle = s.LAST_IMPORT_SNAPSHOT.get(key);
+        Map<String, String> prevValue = s.LAST_VALUE_SNAPSHOT.get(key);
         boolean keyMatched = prevStyle != null && prevValue != null;
 
         if (!keyMatched && r.getExcelRowIndex() != null) {
             // 先尝试精确行号
-            prevStyle = LAST_STYLE_BY_ROW.get(r.getExcelRowIndex());
-            prevValue = LAST_VALUE_BY_ROW.get(r.getExcelRowIndex());
+            prevStyle = s.LAST_STYLE_BY_ROW.get(r.getExcelRowIndex());
+            prevValue = s.LAST_VALUE_BY_ROW.get(r.getExcelRowIndex());
             keyMatched = prevStyle != null && prevValue != null;
             // 再尝试邻近行窗口（±2），抵抗小幅漂移
             if (!keyMatched) {
@@ -161,13 +203,13 @@ public class OrderServiceImpl implements OrderService {
                     int up = r.getExcelRowIndex() - d;
                     int down = r.getExcelRowIndex() + d;
                     if (!keyMatched && up >= 0) {
-                        prevStyle = LAST_STYLE_BY_ROW.get(up);
-                        prevValue = LAST_VALUE_BY_ROW.get(up);
+                        prevStyle = s.LAST_STYLE_BY_ROW.get(up);
+                        prevValue = s.LAST_VALUE_BY_ROW.get(up);
                         keyMatched = prevStyle != null && prevValue != null;
                     }
                     if (!keyMatched && down >= 0) {
-                        prevStyle = LAST_STYLE_BY_ROW.get(down);
-                        prevValue = LAST_VALUE_BY_ROW.get(down);
+                        prevStyle = s.LAST_STYLE_BY_ROW.get(down);
+                        prevValue = s.LAST_VALUE_BY_ROW.get(down);
                         keyMatched = prevStyle != null && prevValue != null;
                     }
                     if (keyMatched) break;
@@ -176,21 +218,21 @@ public class OrderServiceImpl implements OrderService {
         }
         if (!keyMatched) {
             String tKey = (r.getTrackingNumber() == null ? "" : r.getTrackingNumber().toUpperCase(Locale.ROOT));
-            prevStyle = LAST_STYLE_BY_TRACKING.get(tKey);
-            prevValue = LAST_VALUE_BY_TRACKING.get(tKey);
+            prevStyle = s.LAST_STYLE_BY_TRACKING.get(tKey);
+            prevValue = s.LAST_VALUE_BY_TRACKING.get(tKey);
         }
 
         if (prevStyle == null || prevValue == null || prevStyle.isEmpty()) {
             // 首次：建立基线，不提示
-            LAST_IMPORT_SNAPSHOT.put(key, curStyle);
-            LAST_VALUE_SNAPSHOT.put(key, curValue);
+            s.LAST_IMPORT_SNAPSHOT.put(key, curStyle);
+            s.LAST_VALUE_SNAPSHOT.put(key, curValue);
             if (r.getExcelRowIndex() != null) {
-                LAST_STYLE_BY_ROW.put(r.getExcelRowIndex(), curStyle);
-                LAST_VALUE_BY_ROW.put(r.getExcelRowIndex(), curValue);
+                s.LAST_STYLE_BY_ROW.put(r.getExcelRowIndex(), curStyle);
+                s.LAST_VALUE_BY_ROW.put(r.getExcelRowIndex(), curValue);
             }
             String tKey = (r.getTrackingNumber() == null ? "" : r.getTrackingNumber().toUpperCase(Locale.ROOT));
-            LAST_STYLE_BY_TRACKING.put(tKey, curStyle);
-            LAST_VALUE_BY_TRACKING.put(tKey, curValue);
+            s.LAST_STYLE_BY_TRACKING.put(tKey, curStyle);
+            s.LAST_VALUE_BY_TRACKING.put(tKey, curValue);
             return Optional.empty();
         }
 
@@ -199,8 +241,8 @@ public class OrderServiceImpl implements OrderService {
             CellStyleSnap a = prevStyle.get(f);
             CellStyleSnap b = curStyle.get(f);
             boolean styleChanged = !Objects.equals(a == null ? null : a.getBg(),   b == null ? null : b.getBg())
-                                || !Objects.equals(a == null ? null : a.getFont(), b == null ? null : b.getFont())
-                                || !Objects.equals(a == null ? Boolean.FALSE : a.getStrike(), b == null ? Boolean.FALSE : b.getStrike());
+                    || !Objects.equals(a == null ? null : a.getFont(), b == null ? null : b.getFont())
+                    || !Objects.equals(a == null ? Boolean.FALSE : a.getStrike(), b == null ? Boolean.FALSE : b.getStrike());
             String va = prevValue.get(f);
             String vb = curValue.get(f);
             boolean valueChanged = !Objects.equals(va, vb);
@@ -208,16 +250,16 @@ public class OrderServiceImpl implements OrderService {
         }
 
         // 更新基线为本次
-        LAST_IMPORT_SNAPSHOT.put(key, curStyle);
-        LAST_VALUE_SNAPSHOT.put(key, curValue);
+        s.LAST_IMPORT_SNAPSHOT.put(key, curStyle);
+        s.LAST_VALUE_SNAPSHOT.put(key, curValue);
         if (r.getExcelRowIndex() != null) {
-            LAST_STYLE_BY_ROW.put(r.getExcelRowIndex(), curStyle);
-            LAST_VALUE_BY_ROW.put(r.getExcelRowIndex(), curValue);
+            s.LAST_STYLE_BY_ROW.put(r.getExcelRowIndex(), curStyle);
+            s.LAST_VALUE_BY_ROW.put(r.getExcelRowIndex(), curValue);
         }
         // 同步 tracking 兜底映射（避免下一次按 tracking 兜底对齐缺失）
         String tKey2 = (r.getTrackingNumber() == null ? "" : r.getTrackingNumber().toUpperCase(Locale.ROOT));
-        LAST_STYLE_BY_TRACKING.put(tKey2, curStyle);
-        LAST_VALUE_BY_TRACKING.put(tKey2, curValue);
+        s.LAST_STYLE_BY_TRACKING.put(tKey2, curStyle);
+        s.LAST_VALUE_BY_TRACKING.put(tKey2, curValue);
 
         if (changedField == null) return Optional.empty();
         Map<String, Object> row = new HashMap<>();
@@ -257,7 +299,7 @@ public class OrderServiceImpl implements OrderService {
      * 同时更新该行的基线快照。
      * 返回：true 表示发生变化；false 表示未变化。
      */
-    private boolean isRowChangedAndUpdateBaseline(OrderRecord r) {
+    private boolean isRowChangedAndUpdateBaseline(OrderRecord r, String operator) { Snapshot s = snaps(operator);
         Integer row = r.getExcelRowIndex();
         Map<String, CellStyleSnap> curStyle = buildStyleMap(r);
         Map<String, String> curValue = buildValueMap(r);
@@ -265,8 +307,8 @@ public class OrderServiceImpl implements OrderService {
         if (row == null) {
             return true;
         }
-        Map<String, CellStyleSnap> prevStyle = LAST_STYLE_BY_ROW.get(row);
-        Map<String, String> prevValue = LAST_VALUE_BY_ROW.get(row);
+        Map<String, CellStyleSnap> prevStyle = s.LAST_STYLE_BY_ROW.get(row);
+        Map<String, String> prevValue = s.LAST_VALUE_BY_ROW.get(row);
         boolean changed = false;
         if (prevStyle == null || prevValue == null) {
             changed = true; // 首次出现，视为变化
@@ -277,8 +319,8 @@ public class OrderServiceImpl implements OrderService {
                 CellStyleSnap a = prevStyle.get(f);
                 CellStyleSnap b = curStyle.get(f);
                 boolean styleChanged = !Objects.equals(a == null ? null : a.getBg(),   b == null ? null : b.getBg())
-                                    || !Objects.equals(a == null ? null : a.getFont(), b == null ? null : b.getFont())
-                                    || !Objects.equals(a == null ? Boolean.FALSE : a.getStrike(), b == null ? Boolean.FALSE : b.getStrike());
+                        || !Objects.equals(a == null ? null : a.getFont(), b == null ? null : b.getFont())
+                        || !Objects.equals(a == null ? Boolean.FALSE : a.getStrike(), b == null ? Boolean.FALSE : b.getStrike());
                 String va = prevValue.get(f);
                 String vb = curValue.get(f);
                 boolean valueChanged = !Objects.equals(va, vb);
@@ -286,18 +328,29 @@ public class OrderServiceImpl implements OrderService {
             }
         }
         // 更新该行的基线
-        LAST_STYLE_BY_ROW.put(row, curStyle);
-        LAST_VALUE_BY_ROW.put(row, curValue);
+        s.LAST_STYLE_BY_ROW.put(row, curStyle);
+        s.LAST_VALUE_BY_ROW.put(row, curValue);
         return changed;
     }
 
-    private boolean isChangedAndUpdateBaseline(OrderRecord r) {
-        // 1. 首先查询数据库中是否存在相同运单号+SN 的最新记录
+    private boolean isChangedAndUpdateBaseline(OrderRecord r, String operator) {
+        Snapshot s = snaps(operator);
+        // 1. 优先使用ID匹配记录（如果Excel中包含ID）
         OrderRecord dbLatest = null;
         List<OrderCellStyle> dbStyles = null;
 
-        // 只要有运单号或SN其中之一，就尝试查询数据库
-        if (StringUtils.hasText(r.getTrackingNumber()) || StringUtils.hasText(r.getSn())) {
+        if (r.getId() != null && r.getId() > 0) {
+            // Excel中有ID，直接按ID查询
+            dbLatest = orderRecordMapper.selectById(r.getId());
+            if (dbLatest != null) {
+                // 查询该记录的样式
+                dbStyles = orderCellStyleMapper.selectList(
+                        new QueryWrapper<OrderCellStyle>().lambda()
+                                .eq(OrderCellStyle::getOrderId, dbLatest.getId())
+                );
+            }
+        } else if (StringUtils.hasText(r.getTrackingNumber()) || StringUtils.hasText(r.getSn())) {
+            // 没有ID，回退到原来的逻辑：按运单号+SN匹配
             LambdaQueryWrapper<OrderRecord> wrapper = new LambdaQueryWrapper<>();
 
             // 构建查询条件：运单号和SN都要匹配（包括 null 的情况）
@@ -319,8 +372,8 @@ public class OrderServiceImpl implements OrderService {
             if (dbLatest != null) {
                 // 查询该记录的样式
                 dbStyles = orderCellStyleMapper.selectList(
-                    new QueryWrapper<OrderCellStyle>().lambda()
-                        .eq(OrderCellStyle::getOrderId, dbLatest.getId())
+                        new QueryWrapper<OrderCellStyle>().lambda()
+                                .eq(OrderCellStyle::getOrderId, dbLatest.getId())
                 );
             }
         }
@@ -341,8 +394,8 @@ public class OrderServiceImpl implements OrderService {
                 CellStyleSnap a = dbStyleMap.get(f);
                 CellStyleSnap b = curStyle.get(f);
                 boolean styleChanged = !Objects.equals(a == null ? null : a.getBg(),   b == null ? null : b.getBg())
-                                    || !Objects.equals(a == null ? null : a.getFont(), b == null ? null : b.getFont())
-                                    || !Objects.equals(a == null ? Boolean.FALSE : a.getStrike(), b == null ? Boolean.FALSE : b.getStrike());
+                        || !Objects.equals(a == null ? null : a.getFont(), b == null ? null : b.getFont())
+                        || !Objects.equals(a == null ? Boolean.FALSE : a.getStrike(), b == null ? Boolean.FALSE : b.getStrike());
                 String va = dbValueMap.get(f);
                 String vb = curValue.get(f);
                 boolean valueChanged = !Objects.equals(va, vb);
@@ -352,17 +405,26 @@ public class OrderServiceImpl implements OrderService {
                 }
             }
 
+            // 如果通过ID匹配到了记录，保存匹配到的记录ID（用于后续更新而不是插入）
+            if (r.getId() != null && r.getId().equals(dbLatest.getId())) {
+                // Excel中的ID与数据库匹配，标记为需要更新
+                r.setId(dbLatest.getId());
+            } else if (r.getId() == null) {
+                // Excel中没有ID，但通过运单号+SN匹配到了，也应该更新而不是插入
+                r.setId(dbLatest.getId());
+            }
+
             // 仍然更新内存快照（用于会话内的快速比较）
             String key = styleKey(r);
-            LAST_IMPORT_SNAPSHOT.put(key, curStyle);
-            LAST_VALUE_SNAPSHOT.put(key, curValue);
+            s.LAST_IMPORT_SNAPSHOT.put(key, curStyle);
+            s.LAST_VALUE_SNAPSHOT.put(key, curValue);
             if (r.getExcelRowIndex() != null) {
-                LAST_STYLE_BY_ROW.put(r.getExcelRowIndex(), curStyle);
-                LAST_VALUE_BY_ROW.put(r.getExcelRowIndex(), curValue);
+                s.LAST_STYLE_BY_ROW.put(r.getExcelRowIndex(), curStyle);
+                s.LAST_VALUE_BY_ROW.put(r.getExcelRowIndex(), curValue);
             }
             String tKey = (r.getTrackingNumber() == null ? "" : r.getTrackingNumber().toUpperCase(Locale.ROOT));
-            LAST_STYLE_BY_TRACKING.put(tKey, curStyle);
-            LAST_VALUE_BY_TRACKING.put(tKey, curValue);
+            s.LAST_STYLE_BY_TRACKING.put(tKey, curStyle);
+            s.LAST_VALUE_BY_TRACKING.put(tKey, curValue);
 
             return changed;
         }
@@ -373,15 +435,15 @@ public class OrderServiceImpl implements OrderService {
         Map<String, String> curValue = buildValueMap(r);
 
         // 更新内存快照
-        LAST_IMPORT_SNAPSHOT.put(key, curStyle);
-        LAST_VALUE_SNAPSHOT.put(key, curValue);
+        s.LAST_IMPORT_SNAPSHOT.put(key, curStyle);
+        s.LAST_VALUE_SNAPSHOT.put(key, curValue);
         if (r.getExcelRowIndex() != null) {
-            LAST_STYLE_BY_ROW.put(r.getExcelRowIndex(), curStyle);
-            LAST_VALUE_BY_ROW.put(r.getExcelRowIndex(), curValue);
+            s.LAST_STYLE_BY_ROW.put(r.getExcelRowIndex(), curStyle);
+            s.LAST_VALUE_BY_ROW.put(r.getExcelRowIndex(), curValue);
         }
         String tKey = (r.getTrackingNumber() == null ? "" : r.getTrackingNumber().toUpperCase(Locale.ROOT));
-        LAST_STYLE_BY_TRACKING.put(tKey, curStyle);
-        LAST_VALUE_BY_TRACKING.put(tKey, curValue);
+        s.LAST_STYLE_BY_TRACKING.put(tKey, curStyle);
+        s.LAST_VALUE_BY_TRACKING.put(tKey, curValue);
 
         return true;
     }
@@ -409,17 +471,25 @@ public class OrderServiceImpl implements OrderService {
                 if (record.getTrackingNumber() != null) {
                     record.setCategory(TrackingCategoryUtil.resolve(record.getTrackingNumber()));
                 }
-                // 变更检测（优先使用“运单号+SN”对齐；未命中再按行号以及 tracking 兜底）
+                // 变更检测（优先使用ID对齐，次选"运单号+SN"对齐；未命中再按行号以及 tracking 兜底）
                 // 内容/格式/颜色 任一变化才写库；首次见到视为变化
-                boolean changed = isChangedAndUpdateBaseline(record);
+                Long existingId = record.getId(); // 保存原始ID（如果有）
+                boolean changed = isChangedAndUpdateBaseline(record, operator);
                 if (!changed) {
                     skippedUnchanged++;
                     if (record.getExcelRowIndex() != null) skippedRows.add(record.getExcelRowIndex());
                     // 未变化：不插入、不更新样式、不生成结算待处理
                     continue;
                 }
-                // 直接插入，不做唯一性检查，允许重复数据
-                insertDirectly(record);
+
+                // 如果record.id不为空，说明找到了匹配的旧记录，应该更新而不是插入
+                if (record.getId() != null && record.getId() > 0) {
+                    // 更新现有记录
+                    updateDirectly(record);
+                } else {
+                    // 直接插入，不做唯一性检查，允许重复数据
+                    insertDirectly(record);
+                }
                 // 持久化最新样式（B~F列）供刷新后展示
                 persistOrderStyles(record);
                 changedRecords.add(record);
@@ -472,8 +542,8 @@ public class OrderServiceImpl implements OrderService {
 
     @Override
     @Cacheable(value = "orders",
-                   key = "'page1:' + #request.size + ':' + #request.startDate + ':' + #request.endDate + ':' + #request.category + ':' + #request.status + ':' + #request.keyword + ':' + #request.ownerUsername + ':' + #request.sortBy + ':' + #request.sortOrder", 
-                   condition = "#request.page == 1")
+            key = "'page1:' + #request.size + ':' + #request.startDate + ':' + #request.endDate + ':' + #request.category + ':' + #request.status + ':' + #request.keyword + ':' + #request.ownerUsername + ':' + #request.sortBy + ':' + #request.sortOrder",
+            condition = "#request.page == 1")
     public IPage<OrderRecord> query(OrderFilterRequest request) {
         Page<OrderRecord> page = Page.of(request.getPage(), request.getSize());
         LambdaQueryWrapper<OrderRecord> wrapper = new LambdaQueryWrapper<>();
@@ -491,16 +561,26 @@ public class OrderServiceImpl implements OrderService {
             wrapper.eq(OrderRecord::getStatus, request.getStatus());
         }
         if (request.getKeyword() != null && !request.getKeyword().isBlank()) {
-            // 使用全文索引进行关键字搜索，性能远高于 LIKE
-            String keyword = request.getKeyword();
-            // 在布尔模式下，+ 表示必须包含，* 是通配符
-            // 这里简单处理，在每个词后加 * 实现前缀匹配
-            String booleanModeKeyword = Arrays.stream(keyword.split("\\s+"))
-                .filter(s -> !s.isEmpty())
-                .map(s -> "+" + s + "*")
-                .collect(Collectors.joining(" "));
+            String keyword = request.getKeyword().trim();
 
-            wrapper.apply("MATCH(tracking_number, sn, model) AGAINST({0} IN BOOLEAN MODE)", booleanModeKeyword);
+            // 检测是否为运单号格式（包含 - 符号）
+            // 运单号格式如: JDX045395221407-1-1, SF2034401724303
+            // 全文索引会把 - 当作分隔符，导致无法精确匹配，需使用 LIKE
+            if (keyword.contains("-")) {
+                // 对于运单号格式，使用 LIKE 精确查询
+                wrapper.and(w -> w.like(OrderRecord::getTrackingNumber, keyword)
+                        .or().like(OrderRecord::getSn, keyword)
+                        .or().like(OrderRecord::getModel, keyword));
+            } else {
+                // 其他关键字使用全文索引进行搜索，性能更高
+                // 在布尔模式下，+ 表示必须包含，* 是通配符
+                String booleanModeKeyword = Arrays.stream(keyword.split("\\s+"))
+                        .filter(s -> !s.isEmpty())
+                        .map(s -> "+" + s + "*")
+                        .collect(Collectors.joining(" "));
+
+                wrapper.apply("MATCH(tracking_number, sn, model) AGAINST({0} IN BOOLEAN MODE)", booleanModeKeyword);
+            }
         }
 
         // 归属用户筛选（基于 user_submission 最新记录的 ownerUsername/username）
@@ -509,13 +589,13 @@ public class OrderServiceImpl implements OrderService {
             // 1) 找到该用户相关的提交记录（作为 owner 或 submitter）
             LambdaQueryWrapper<UserSubmission> first = new LambdaQueryWrapper<>();
             first.select(UserSubmission::getTrackingNumber)
-                .and(w -> w.eq(UserSubmission::getOwnerUsername, targetOwner).or().eq(UserSubmission::getUsername, targetOwner));
+                    .and(w -> w.eq(UserSubmission::getOwnerUsername, targetOwner).or().eq(UserSubmission::getUsername, targetOwner));
             List<UserSubmission> ownerRelated = userSubmissionMapper.selectList(first);
             Set<String> relatedTns = ownerRelated.stream()
-                .map(UserSubmission::getTrackingNumber)
-                .filter(StringUtils::hasText)
-                .map(String::trim)
-                .collect(Collectors.toSet());
+                    .map(UserSubmission::getTrackingNumber)
+                    .filter(StringUtils::hasText)
+                    .map(String::trim)
+                    .collect(Collectors.toSet());
 
             if (relatedTns.isEmpty()) {
                 // 无匹配，直接返回空
@@ -525,7 +605,7 @@ public class OrderServiceImpl implements OrderService {
             // 2) 对这些运单号查询其最新的提交记录
             LambdaQueryWrapper<UserSubmission> latestQ = new LambdaQueryWrapper<>();
             latestQ.in(UserSubmission::getTrackingNumber, relatedTns)
-                .select(UserSubmission::getTrackingNumber, UserSubmission::getOwnerUsername, UserSubmission::getUsername, UserSubmission::getCreatedAt);
+                    .select(UserSubmission::getTrackingNumber, UserSubmission::getOwnerUsername, UserSubmission::getUsername, UserSubmission::getCreatedAt);
             List<UserSubmission> latestCandidates = userSubmissionMapper.selectList(latestQ);
 
             Map<String, UserSubmission> latestMap = new HashMap<>();
@@ -540,13 +620,13 @@ public class OrderServiceImpl implements OrderService {
 
             // 3) 仅保留“最新记录归属人 == 目标用户”的运单号
             Set<String> finalTns = latestMap.entrySet().stream()
-                .filter(e -> {
-                    UserSubmission s = e.getValue();
-                    String owner = StringUtils.hasText(s.getOwnerUsername()) ? s.getOwnerUsername().trim() : s.getUsername();
-                    return targetOwner.equals(owner);
-                })
-                .map(Map.Entry::getKey)
-                .collect(Collectors.toSet());
+                    .filter(e -> {
+                        UserSubmission s = e.getValue();
+                        String owner = StringUtils.hasText(s.getOwnerUsername()) ? s.getOwnerUsername().trim() : s.getUsername();
+                        return targetOwner.equals(owner);
+                    })
+                    .map(Map.Entry::getKey)
+                    .collect(Collectors.toSet());
 
             if (finalTns.isEmpty()) {
                 return Page.of(request.getPage(), request.getSize());
@@ -615,9 +695,9 @@ public class OrderServiceImpl implements OrderService {
 
         // 收集所有运单号
         Set<String> trackingNumbers = records.stream()
-            .map(OrderRecord::getTrackingNumber)
-            .filter(StringUtils::hasText)
-            .collect(Collectors.toSet());
+                .map(OrderRecord::getTrackingNumber)
+                .filter(StringUtils::hasText)
+                .collect(Collectors.toSet());
 
         if (trackingNumbers.isEmpty()) {
             return;
@@ -626,7 +706,7 @@ public class OrderServiceImpl implements OrderService {
         // 批量查询用户提交记录，获取归属用户
         LambdaQueryWrapper<UserSubmission> wrapper = new LambdaQueryWrapper<>();
         wrapper.in(UserSubmission::getTrackingNumber, trackingNumbers)
-            .select(UserSubmission::getTrackingNumber, UserSubmission::getOwnerUsername, UserSubmission::getUsername, UserSubmission::getCreatedAt);
+                .select(UserSubmission::getTrackingNumber, UserSubmission::getOwnerUsername, UserSubmission::getUsername, UserSubmission::getCreatedAt);
         List<UserSubmission> submissions = userSubmissionMapper.selectList(wrapper);
 
         // 按 trackingNumber 分组，选择最新一条记录的 ownerUsername（为空则用 username）
@@ -694,8 +774,8 @@ public class OrderServiceImpl implements OrderService {
             orderCellStyleMapper.insert(s);
         } else {
             boolean changed = !Objects.equals(bg, old.getBgColor())
-                           || !Objects.equals(fg, old.getFontColor())
-                           || !Objects.equals(Boolean.TRUE.equals(strike), Boolean.TRUE.equals(old.getStrike()));
+                    || !Objects.equals(fg, old.getFontColor())
+                    || !Objects.equals(Boolean.TRUE.equals(strike), Boolean.TRUE.equals(old.getStrike()));
             if (changed) {
                 old.setBgColor(bg);
                 old.setFontColor(fg);
@@ -757,20 +837,20 @@ public class OrderServiceImpl implements OrderService {
         // 新样式来自本次解析的 transient 字段
         List<Map<String, Object>> diffs = new ArrayList<>();
         compareOne(diffs, r, oldMap.get("tracking"), "tracking",
-            r.getTrackingBgColor(), r.getTrackingFontColor(), r.getTrackingStrike());
+                r.getTrackingBgColor(), r.getTrackingFontColor(), r.getTrackingStrike());
         compareOne(diffs, r, oldMap.get("model"), "model",
-            r.getModelBgColor(), r.getModelFontColor(), r.getModelStrike());
+                r.getModelBgColor(), r.getModelFontColor(), r.getModelStrike());
         compareOne(diffs, r, oldMap.get("sn"), "sn",
-            r.getSnBgColor(), r.getSnFontColor(), r.getSnStrike());
+                r.getSnBgColor(), r.getSnFontColor(), r.getSnStrike());
         compareOne(diffs, r, oldMap.get("remark"), "remark",
-            r.getRemarkBgColor(), r.getRemarkFontColor(), r.getRemarkStrike());
+                r.getRemarkBgColor(), r.getRemarkFontColor(), r.getRemarkStrike());
         compareOne(diffs, r, oldMap.get("amount"), "amount",
-            r.getAmountBgColor(), r.getAmountFontColor(), r.getAmountStrike());
+                r.getAmountBgColor(), r.getAmountFontColor(), r.getAmountStrike());
         return diffs;
     }
 
     private void compareOne(List<Map<String, Object>> out, OrderRecord r, OrderCellStyle oldS,
-                             String field, String newBg, String newFg, Boolean newStrike) {
+                            String field, String newBg, String newFg, Boolean newStrike) {
         String oldBg = oldS == null ? null : oldS.getBgColor();
         String oldFg = oldS == null ? null : oldS.getFontColor();
         Boolean oldSt = oldS == null ? null : oldS.getStrike();
@@ -807,16 +887,16 @@ public class OrderServiceImpl implements OrderService {
     private Map<String, List<String>> findDuplicateSnInList(List<OrderRecord> records) {
         Map<String, List<String>> map = new HashMap<>();
         records.stream()
-            .filter(r -> StringUtils.hasText(r.getSn()))
-            .forEach(r -> {
-                String sn = r.getSn().trim();
-                map.computeIfAbsent(sn, key -> new ArrayList<>()).add(
-                    StringUtils.hasText(r.getTrackingNumber()) ? r.getTrackingNumber().trim() : "(无单号)"
-                );
-            });
+                .filter(r -> StringUtils.hasText(r.getSn()))
+                .forEach(r -> {
+                    String sn = r.getSn().trim();
+                    map.computeIfAbsent(sn, key -> new ArrayList<>()).add(
+                            StringUtils.hasText(r.getTrackingNumber()) ? r.getTrackingNumber().trim() : "(无单号)"
+                    );
+                });
         return map.entrySet().stream()
-            .filter(e -> e.getValue().size() > 1)
-            .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+                .filter(e -> e.getValue().size() > 1)
+                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
     }
 
     @Override
@@ -897,10 +977,10 @@ public class OrderServiceImpl implements OrderService {
         }
         LambdaQueryWrapper<OrderRecord> wrapper = new LambdaQueryWrapper<>();
         var unique = trackingNumbers.stream()
-            .filter(Objects::nonNull)
-            .map(String::trim)
-            .filter(str -> !str.isEmpty())
-            .collect(Collectors.toSet());
+                .filter(Objects::nonNull)
+                .map(String::trim)
+                .filter(str -> !str.isEmpty())
+                .collect(Collectors.toSet());
         if (unique.isEmpty()) {
             return List.of();
         }
@@ -915,23 +995,23 @@ public class OrderServiceImpl implements OrderService {
         }
         //// 去掉 null / "" / "   "  去空格 再次过滤空字符串 去重
         var unique = keywords.stream()
-            .filter(StringUtils::hasText)
-            .map(String::trim)
-            .filter(str -> !str.isEmpty())
-            .collect(Collectors.toSet());
+                .filter(StringUtils::hasText)
+                .map(String::trim)
+                .filter(str -> !str.isEmpty())
+                .collect(Collectors.toSet());
         if (unique.isEmpty()) {
             return List.of();
         }
         List<String> prefixes = unique.stream()
-            .map(String::trim)
-            .map(str -> str.replaceAll("-+$", ""))
-            .filter(str -> str.length() >= 6)
-            .filter(str -> !str.contains("-"))
-            .toList();
+                .map(String::trim)
+                .map(str -> str.replaceAll("-+$", ""))
+                .filter(str -> str.length() >= 6)
+                .filter(str -> !str.contains("-"))
+                .toList();
         LambdaQueryWrapper<OrderRecord> wrapper = new LambdaQueryWrapper<>();
         wrapper.and(w -> w.in(OrderRecord::getTrackingNumber, unique)
-            .or()
-            .in(OrderRecord::getSn, unique));
+                .or()
+                .in(OrderRecord::getSn, unique));
         if (!prefixes.isEmpty()) {
             wrapper.or(w -> {
                 for (int i = 0; i < prefixes.size(); i++) {
@@ -966,8 +1046,8 @@ public class OrderServiceImpl implements OrderService {
         }
         List<OrderRecord> existing = findByTracking(request.getTrackingNumbers());
         List<String> existNumbers = existing.stream()
-            .map(OrderRecord::getTrackingNumber)
-            .collect(Collectors.toList());
+                .map(OrderRecord::getTrackingNumber)
+                .collect(Collectors.toList());
 
         List<OrderRecord> created = new ArrayList<>();
         for (String tracking : request.getTrackingNumbers()) {
@@ -1047,8 +1127,8 @@ public class OrderServiceImpl implements OrderService {
         }
         if (StringUtils.hasText(request.getKeyword())) {
             wrapper.and(w -> w.like("tracking_number", request.getKeyword())
-                .or().like("sn", request.getKeyword())
-                .or().like("model", request.getKeyword()));
+                    .or().like("sn", request.getKeyword())
+                    .or().like("model", request.getKeyword()));
         }
         wrapper.select("COALESCE(category, '未分配') AS category_name", "COUNT(*) AS total_count");
         wrapper.groupBy("COALESCE(category, '未分配')");
@@ -1061,6 +1141,72 @@ public class OrderServiceImpl implements OrderService {
             stats.setCount(countObj == null ? 0 : ((Number) countObj).longValue());
             return stats;
         }).collect(Collectors.toList());
+    }
+
+    /**
+     * 更新订单记录（通过ID匹配）
+     * 如果ID对应的记录不存在，则清空ID并插入新记录
+     */
+    private void updateDirectly(OrderRecord incoming) {
+        if (incoming.getId() == null || incoming.getId() <= 0) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "更新记录时ID不能为空");
+        }
+
+        // 先检查记录是否存在
+        OrderRecord existing = orderRecordMapper.selectById(incoming.getId());
+        if (existing == null) {
+            // 记录不存在，清空ID，改为插入新记录
+            System.out.println("警告: ID=" + incoming.getId() + " 的记录不存在于数据库，将作为新记录插入");
+            incoming.setId(null);
+            insertDirectly(incoming);
+            return;
+        }
+
+        // 处理日期和时间
+        if (incoming.getOrderDate() == null && incoming.getOrderTime() != null) {
+            incoming.setOrderDate(incoming.getOrderTime().toLocalDate());
+        }
+        if (incoming.getOrderTime() == null && incoming.getOrderDate() != null) {
+            incoming.setOrderTime(incoming.getOrderDate().atStartOfDay());
+        }
+
+        // 截断过长的字段，防止数据库错误
+        if (StringUtils.hasText(incoming.getModel()) && incoming.getModel().length() > 50) {
+            incoming.setModel(incoming.getModel().substring(0, 50));
+        }
+        if (StringUtils.hasText(incoming.getTrackingNumber()) && incoming.getTrackingNumber().length() > 64) {
+            incoming.setTrackingNumber(incoming.getTrackingNumber().substring(0, 64));
+        }
+        if (StringUtils.hasText(incoming.getRemark()) && incoming.getRemark().length() > 255) {
+            incoming.setRemark(incoming.getRemark().substring(0, 255));
+        }
+
+        // 设置默认值
+        if (incoming.getStatus() == null) {
+            incoming.setStatus("UNPAID");
+        }
+        if (incoming.getCurrency() == null) {
+            incoming.setCurrency("CNY");
+        }
+        if (incoming.getImported() == null) {
+            incoming.setImported(Boolean.TRUE);
+        }
+
+        // 通过ID更新记录
+        try {
+            int updatedRows = orderRecordMapper.updateById(incoming);
+            if (updatedRows == 0) {
+                System.err.println("警告: 更新记录失败，没有行被更新。ID=" + incoming.getId() +
+                        ", trackingNumber=" + incoming.getTrackingNumber() +
+                        ", sn=" + incoming.getSn());
+            }
+        } catch (Exception e) {
+            System.err.println("警告: 更新记录时发生异常，ID=" + incoming.getId() +
+                    ", trackingNumber=" + incoming.getTrackingNumber() +
+                    ", sn=" + incoming.getSn() +
+                    ", 错误: " + e.getMessage());
+            throw e;
+        }
     }
 
     /**
@@ -1106,10 +1252,10 @@ public class OrderServiceImpl implements OrderService {
         } catch (org.springframework.dao.DuplicateKeyException e) {
             // 如果数据库仍有唯一约束导致插入失败，记录日志但继续处理
             // 建议执行 remove_unique_constraint.sql 迁移脚本删除唯一约束
-            System.err.println("警告: 插入记录失败（可能因唯一约束），跳过该记录: " + 
-                "trackingNumber=" + incoming.getTrackingNumber() + 
-                ", sn=" + incoming.getSn() + 
-                ", 错误: " + e.getMessage());
+            System.err.println("警告: 插入记录失败（可能因唯一约束），跳过该记录: " +
+                    "trackingNumber=" + incoming.getTrackingNumber() +
+                    ", sn=" + incoming.getSn() +
+                    ", 错误: " + e.getMessage());
             // 不抛出异常，继续处理下一条记录
         }
     }
@@ -1122,7 +1268,7 @@ public class OrderServiceImpl implements OrderService {
     private void upsertBySn(OrderRecord incoming) {
         LambdaQueryWrapper<OrderRecord> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(OrderRecord::getSn, incoming.getSn())
-               .eq(StringUtils.hasText(incoming.getTrackingNumber()), OrderRecord::getTrackingNumber, incoming.getTrackingNumber());
+                .eq(StringUtils.hasText(incoming.getTrackingNumber()), OrderRecord::getTrackingNumber, incoming.getTrackingNumber());
         OrderRecord existed = orderRecordMapper.selectOne(wrapper);
         if (incoming.getOrderDate() == null && incoming.getOrderTime() != null) {
             incoming.setOrderDate(incoming.getOrderTime().toLocalDate());
@@ -1157,7 +1303,7 @@ public class OrderServiceImpl implements OrderService {
         }
         LambdaQueryWrapper<UserSubmission> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(UserSubmission::getTrackingNumber, trackingNumber.trim())
-            .ne(UserSubmission::getStatus, "COMPLETED");
+                .ne(UserSubmission::getStatus, "COMPLETED");
         return userSubmissionMapper.selectCount(wrapper) > 0;
     }
 }
