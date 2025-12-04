@@ -132,7 +132,7 @@
                                     INDEX idx_price_date(price_date)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-    -- 结账记录表
+    -- 结账记录表对
     CREATE TABLE settlement_record (
                                        id              BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
                                        order_id        BIGINT UNSIGNED,

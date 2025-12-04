@@ -38,6 +38,7 @@ import java.util.*;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.CollectionUtils;
@@ -362,6 +363,7 @@ public class SettlementServiceImpl implements SettlementService {
 
     @Override
     @Transactional
+    @CacheEvict(value = "orders", allEntries = true)
     public void confirm(Long id, SettlementConfirmRequest request, String operator) {
         SettlementRecord record = settlementRecordMapper.selectById(id);
         if (record == null) {
@@ -426,6 +428,7 @@ public class SettlementServiceImpl implements SettlementService {
 
     @Override
     @Transactional
+    @CacheEvict(value = "orders", allEntries = true)
     public int updateAmountByModel(SettlementBatchPriceRequest request) {
         String model = request.getModel().trim();
         LambdaQueryWrapper<SettlementRecord> wrapper = new LambdaQueryWrapper<>();
@@ -480,6 +483,7 @@ public class SettlementServiceImpl implements SettlementService {
 
     @Override
     @Transactional
+    @CacheEvict(value = "orders", allEntries = true)
     public void confirmBatch(SettlementBatchConfirmRequest request, String operator) {
         if (CollectionUtils.isEmpty(request.getIds())) {
             return;
@@ -520,6 +524,7 @@ public class SettlementServiceImpl implements SettlementService {
 
     @Override
     @Transactional
+    @CacheEvict(value = "orders", allEntries = true)
     public void updateAmount(Long id, SettlementAmountRequest request) {
         SettlementRecord record = settlementRecordMapper.selectById(id);
         if (record == null) {
@@ -861,6 +866,7 @@ public class SettlementServiceImpl implements SettlementService {
 
     @Override
     @Transactional
+    @CacheEvict(value = "orders", allEntries = true)
     public SettlementBatchSnPriceResponse updateAmountBySn(SettlementBatchSnPriceRequest request) {
         if (CollectionUtils.isEmpty(request.getSns())) {
             return new SettlementBatchSnPriceResponse(0, List.of());
@@ -1006,6 +1012,7 @@ public class SettlementServiceImpl implements SettlementService {
 
     @Override
     @Transactional
+    @CacheEvict(value = "orders", allEntries = true)
     public int confirmAll(SettlementFilterRequest request, String operator) {
         // 强制状态为 PENDING，只确认待结账的记录
         request.setStatus("PENDING");

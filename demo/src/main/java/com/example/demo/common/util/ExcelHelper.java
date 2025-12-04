@@ -96,8 +96,8 @@ public final class ExcelHelper {
             String lastTracking = null;
             int startRow = detectDataStartRow(sheet);
 
-            // ID列固定在第0列
-            int idColumnIndex = 0;
+            // ID列从第0列移到第9列（J列）
+            int idColumnIndex = 9;
 
             for (int i = startRow; i <= sheet.getLastRowNum(); i++) {
                 Row row = sheet.getRow(i);
@@ -105,31 +105,21 @@ public final class ExcelHelper {
                     continue;
                 }
                 int cellCount = row.getLastCellNum();
-                // 简单格式：ID, 时间, 运单号, 型号, SN, 备注 (6列)
-                // 复杂格式：ID, 时间, 运单号, 型号, SN, 备注E, 备注F, 金额, 客户名 (9列+)
-                boolean simpleFormat = cellCount <= 6;
+                // 简单格式：时间, 运单号, 型号, SN, 备注 (5列，不含ID)
+                // 完整格式：时间, 运单号, 型号, SN, 备注E, 备注F, 金额, ?, 客户名, ID (10列)
+                boolean simpleFormat = cellCount <= 5;
                 if (simpleFormat) {
-                    // 新的列顺序：ID, 时间, 运单号, 型号, SN, 备注
-                    // 读取ID（第0列）
-                    Cell idCell = row.getCell(0);
-                    Long recordId = null;
-                    if (idCell != null && isNumericCell(idCell)) {
-                        long id = (long) idCell.getNumericCellValue();
-                        if (id > 0) {
-                            recordId = id;
-                        }
-                    }
-
-                    // 时间（第1列）
-                    LocalDateTime dateTime = parseDateTime(row.getCell(1));
+                    // 新的列顺序：时间(A), 运单号(B), 型号(C), SN(D), 备注(E)
+                    // 时间（第0列，A列）
+                    LocalDateTime dateTime = parseDateTime(row.getCell(0));
                     if (dateTime == null) {
                         dateTime = lastDateTime;
                     } else {
                         lastDateTime = dateTime;
                     }
 
-                    // 运单号（第2列）
-                    Cell trackingCell = row.getCell(2);
+                    // 运单号（第1列，B列）
+                    Cell trackingCell = row.getCell(1);
                     String tracking = normalizeTracking(readString(trackingCell));
                     if (tracking == null || tracking.isBlank()) {
                         tracking = lastTracking;
@@ -137,21 +127,31 @@ public final class ExcelHelper {
                         lastTracking = tracking;
                     }
 
-                    // 型号（第3列）
-                    Cell modelCell = row.getCell(3);
+                    // 型号（第2列，C列）
+                    Cell modelCell = row.getCell(2);
                     String model = readString(modelCell);
 
-                    // SN（第4列）
-                    Cell snCell = row.getCell(4);
+                    // SN（第3列，D列）
+                    Cell snCell = row.getCell(3);
                     String sn = readString(snCell);
 
                     if (sn == null || sn.isBlank() || tracking == null || tracking.isBlank()) {
                         continue;
                     }
 
-                    // 备注（第5列），考虑合并单元格
-                    Cell remarkCell = row.getCell(5);
-                    String remark = readMergedAwareString(sheet, i, 5);
+                    // 备注（第4列，E列），考虑合并单元格
+                    Cell remarkCell = row.getCell(4);
+                    String remark = readMergedAwareString(sheet, i, 4);
+
+                    // ID（第9列，J列，简单格式可能没有此列）
+                    Long recordId = null;
+                    Cell idCell = row.getCell(9);
+                    if (idCell != null && isNumericCell(idCell)) {
+                        long id = (long) idCell.getNumericCellValue();
+                        if (id > 0) {
+                            recordId = id;
+                        }
+                    }
 
                     OrderRecord record = new OrderRecord();
                     record.setId(recordId); // 设置ID
@@ -170,8 +170,8 @@ public final class ExcelHelper {
                     record.setCategory(TrackingCategoryUtil.resolve(tracking));
                     record.setCreatedBy(operator);
 
-                    // 样式采集（列：C-F -> tracking/model/sn/remark），不处理金额样式；备注样式考虑合并单元格
-                    Cell remarkStyleCell = mergedTopLeftCell(sheet, i, 5);
+                    // 样式采集（列：B-E -> tracking/model/sn/remark），不处理金额样式；备注样式考虑合并单元格
+                    Cell remarkStyleCell = mergedTopLeftCell(sheet, i, 4);
                     applyCellStyleToRecord(record, trackingCell, modelCell, snCell, null, remarkStyleCell);
 
                     // 行号基准（用于位置对齐）
@@ -179,27 +179,17 @@ public final class ExcelHelper {
 
                     result.add(record);
                 } else {
-                    // 复杂格式：ID, 时间, 运单号, 型号, SN, 备注E, 备注F, 金额, 客户名
-                    // 读取ID（第0列）
-                    Cell idCell = row.getCell(0);
-                    Long recordId = null;
-                    if (idCell != null && isNumericCell(idCell)) {
-                        long id = (long) idCell.getNumericCellValue();
-                        if (id > 0) {
-                            recordId = id;
-                        }
-                    }
-
-                    // 时间（第1列）
-                    LocalDateTime dateTime = parseDateTime(row.getCell(1));
+                    // 完整格式：时间(A), 运单号(B), 型号(C), SN(D), 备注E(E), 备注F(F), 金额(G), ?(H), 客户名(I), ID(J)
+                    // 时间（第0列，A列）
+                    LocalDateTime dateTime = parseDateTime(row.getCell(0));
                     if (dateTime == null) {
                         dateTime = lastDateTime;
                     } else {
                         lastDateTime = dateTime;
                     }
 
-                    // 运单号（第2列）
-                    Cell trackingCell = row.getCell(2);
+                    // 运单号（第1列，B列）
+                    Cell trackingCell = row.getCell(1);
                     String tracking = normalizeTracking(readString(trackingCell));
                     if (tracking == null || tracking.isBlank()) {
                         tracking = lastTracking;
@@ -207,17 +197,27 @@ public final class ExcelHelper {
                         lastTracking = tracking;
                     }
 
-                    // 型号（第3列）
-                    Cell modelCell = row.getCell(3);
+                    // 型号（第2列，C列）
+                    Cell modelCell = row.getCell(2);
 
-                    // SN（第4列）
-                    Cell snCell = row.getCell(4);
+                    // SN（第3列，D列）
+                    Cell snCell = row.getCell(3);
 
-                    // 备注在第5和第6列，合并写入 remark（合并单元格兼容）
-                    String remarkE = readMergedAwareString(sheet, i, 5);
-                    String remarkF = readMergedAwareString(sheet, i, 6);
+                    // 备注在第4和第5列（E、F列），合并写入 remark（合并单元格兼容）
+                    String remarkE = readMergedAwareString(sheet, i, 4);
+                    String remarkF = readMergedAwareString(sheet, i, 5);
                     String mergedRemark = (remarkE == null || remarkE.isBlank()) ? (remarkF == null ? null : remarkF)
                                           : (remarkF == null || remarkF.isBlank() ? remarkE : (remarkE + " " + remarkF));
+
+                    // ID（第9列，J列）
+                    Long recordId = null;
+                    Cell idCell = row.getCell(9);
+                    if (idCell != null && isNumericCell(idCell)) {
+                        long id = (long) idCell.getNumericCellValue();
+                        if (id > 0) {
+                            recordId = id;
+                        }
+                    }
 
                     OrderRecord record = new OrderRecord();
                     record.setId(recordId); // 设置ID
@@ -237,7 +237,7 @@ public final class ExcelHelper {
                     record.setAmount(null);
                     record.setCurrency("CNY");
                     record.setCreatedBy(operator);
-                    record.setCustomerName(readString(row.getCell(9))); // 客户名在第9列
+                    record.setCustomerName(readString(row.getCell(8))); // 客户名在第8列（I列）
 
                     if (record.getTrackingNumber() == null || record.getTrackingNumber().isBlank()) {
                         continue;
@@ -246,9 +246,9 @@ public final class ExcelHelper {
                         continue;
                     }
 
-                    // 样式采集：备注优先取第6列样式，否则取第5列；备注样式考虑合并单元格顶格单元
-                    Cell remarkStyleCell = mergedTopLeftCell(sheet, i, 6);
-                    if (remarkStyleCell == null) remarkStyleCell = mergedTopLeftCell(sheet, i, 5);
+                    // 样式采集：备注优先取第5列样式（F列），否则取第4列（E列）；备注样式考虑合并单元格顶格单元
+                    Cell remarkStyleCell = mergedTopLeftCell(sheet, i, 5);
+                    if (remarkStyleCell == null) remarkStyleCell = mergedTopLeftCell(sheet, i, 4);
                     applyCellStyleToRecord(record, trackingCell, modelCell, snCell, null, remarkStyleCell);
 
                     record.setExcelRowIndex(i - startRow);
@@ -851,61 +851,61 @@ public static byte[] writeSettlements(List<SettlementRecord> records) throws IOE
     }
 
     /**
-     * 导出订单记录到Excel，包含ID列
+     * 导出订单记录到Excel，ID列移到J列（第9列）
      */
     public static byte[] writeOrders(List<OrderRecord> records) throws IOException {
         try (Workbook workbook = new XSSFWorkbook(); ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
             Sheet sheet = workbook.createSheet("订单数据");
 
-            // 表头（ID作为第一列）
+            // 表头：时间(A), 运单号(B), 型号(C), SN(D), 备注(E), 备注F(F), 金额(G), 状态(H), 客户名(I), ID(J)
             Row header = sheet.createRow(0);
-            header.createCell(0).setCellValue("ID");
-            header.createCell(1).setCellValue("时间");
-            header.createCell(2).setCellValue("运单号");
-            header.createCell(3).setCellValue("型号");
-            header.createCell(4).setCellValue("SN");
-            header.createCell(5).setCellValue("备注");
+            header.createCell(0).setCellValue("时间");
+            header.createCell(1).setCellValue("运单号");
+            header.createCell(2).setCellValue("型号");
+            header.createCell(3).setCellValue("SN");
+            header.createCell(4).setCellValue("备注");
+            header.createCell(5).setCellValue("备注F");
             header.createCell(6).setCellValue("金额");
             header.createCell(7).setCellValue("状态");
+            header.createCell(8).setCellValue("客户名");
+            header.createCell(9).setCellValue("ID");
 
             int rowIndex = 1;
             for (OrderRecord record : records) {
                 Row row = sheet.createRow(rowIndex++);
 
-                // ID（第一列）
-                if (record.getId() != null) {
-                    row.createCell(0).setCellValue(record.getId());
-                }
-
-                // 时间（第二列）
+                // 时间（A列，第0列）
                 if (record.getOrderTime() != null) {
-                    row.createCell(1).setCellValue(record.getOrderTime().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")));
+                    row.createCell(0).setCellValue(record.getOrderTime().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")));
                 } else if (record.getOrderDate() != null) {
-                    row.createCell(1).setCellValue(record.getOrderDate().format(DATE_FORMATTER));
+                    row.createCell(0).setCellValue(record.getOrderDate().format(DATE_FORMATTER));
                 } else {
-                    row.createCell(1).setCellValue("");
+                    row.createCell(0).setCellValue("");
                 }
 
-                // 运单号（第三列）
-                row.createCell(2).setCellValue(record.getTrackingNumber() == null ? "" : record.getTrackingNumber());
+                // 运单号（B列，第1列）
+                row.createCell(1).setCellValue(record.getTrackingNumber() == null ? "" : record.getTrackingNumber());
 
-                // 型号（第四列）
-                row.createCell(3).setCellValue(record.getModel() == null ? "" : record.getModel());
+                // 型号（C列，第2列）
+                row.createCell(2).setCellValue(record.getModel() == null ? "" : record.getModel());
 
-                // SN（第五列）
-                row.createCell(4).setCellValue(record.getSn() == null ? "" : record.getSn());
+                // SN（D列，第3列）
+                row.createCell(3).setCellValue(record.getSn() == null ? "" : record.getSn());
 
-                // 备注（第六列）
-                row.createCell(5).setCellValue(record.getRemark() == null ? "" : record.getRemark());
+                // 备注（E列，第4列）
+                row.createCell(4).setCellValue(record.getRemark() == null ? "" : record.getRemark());
 
-                // 金额（第七列）
+                // 备注F（F列，第5列）- 预留空列
+                row.createCell(5).setCellValue("");
+
+                // 金额（G列，第6列）
                 if (record.getAmount() != null) {
                     row.createCell(6).setCellValue(record.getAmount().doubleValue());
                 } else {
                     row.createCell(6).setCellValue("");
                 }
 
-                // 状态（第八列）
+                // 状态（H列，第7列）
                 String status = "";
                 if ("UNPAID".equals(record.getStatus())) {
                     status = "未打款";
@@ -913,10 +913,18 @@ public static byte[] writeSettlements(List<SettlementRecord> records) throws IOE
                     status = "已打款";
                 }
                 row.createCell(7).setCellValue(status);
+
+                // 客户名（I列，第8列）
+                row.createCell(8).setCellValue(record.getCustomerName() == null ? "" : record.getCustomerName());
+
+                // ID（J列，第9列）
+                if (record.getId() != null) {
+                    row.createCell(9).setCellValue(record.getId());
+                }
             }
 
             // 自动列宽
-            for (int c = 0; c <= 7; c++) {
+            for (int c = 0; c <= 9; c++) {
                 sheet.autoSizeColumn(c);
             }
 
