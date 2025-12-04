@@ -3,7 +3,10 @@ package com.example.demo.settlement.controller;
 import cn.dev33.satoken.annotation.SaCheckLogin;
 import cn.dev33.satoken.annotation.SaCheckRole;
 import cn.dev33.satoken.stp.StpUtil;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.example.demo.auth.entity.SysUser;
+import com.example.demo.auth.mapper.SysUserMapper;
 import com.example.demo.common.annotation.LogOperation;
 import com.example.demo.common.response.ApiResponse;
 import com.example.demo.common.response.PageResponse;
@@ -44,12 +47,22 @@ import org.springframework.web.bind.annotation.RestController;
 public class SettlementController {
 
     private final SettlementService settlementService;
+    private final SysUserMapper sysUserMapper;
+
+    private String getUserRole(String username) {
+        LambdaQueryWrapper<SysUser> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(SysUser::getUsername, username);
+        SysUser user = sysUserMapper.selectOne(wrapper);
+        return user != null && "ADMIN".equals(user.getRole()) ? "ADMIN" : "USER";
+    }
 
     @GetMapping
     @SaCheckLogin
     @Operation(summary = "分页查询结算", description = "按状态、批次和时间段查询待结账/已结账记录")
     public ApiResponse<PageResponse<SettlementRecord>> page(SettlementFilterRequest request) {
-        IPage<SettlementRecord> page = settlementService.list(request);
+        String username = StpUtil.getLoginIdAsString();
+        String role = getUserRole(username);
+        IPage<SettlementRecord> page = settlementService.list(request, username, role);
         return ApiResponse.ok(PageResponse.from(page));
     }
 
@@ -57,7 +70,9 @@ public class SettlementController {
     @SaCheckLogin
     @Operation(summary = "游标分页查询结算", description = "使用游标分页，性能不受页数影响，适合深度分页")
     public ApiResponse<PageResponse<SettlementRecord>> pageByCursor(SettlementCursorRequest request) {
-        IPage<SettlementRecord> page = settlementService.listByCursor(request);
+        String username = StpUtil.getLoginIdAsString();
+        String role = getUserRole(username);
+        IPage<SettlementRecord> page = settlementService.listByCursor(request, username, role);
         return ApiResponse.ok(PageResponse.from(page));
     }
 
@@ -115,7 +130,9 @@ public class SettlementController {
     @LogOperation("确认全部查询结果")
     @Operation(summary = "确认全部查询结果", description = "根据当前筛选条件，确认所有待结账的记录")
     public ApiResponse<Integer> confirmAll(@RequestBody SettlementFilterRequest request) {
-        int count = settlementService.confirmAll(request, StpUtil.getLoginIdAsString());
+        String username = StpUtil.getLoginIdAsString();
+        String role = "ADMIN"; // confirmAll 只有管理员可以调用
+        int count = settlementService.confirmAll(request, username, username, role);
         return ApiResponse.ok(count);
     }
 
@@ -144,7 +161,9 @@ public class SettlementController {
     @LogOperation("导出结账数据")
     @Operation(summary = "导出结算数据", description = "将筛选结果导出为 Excel 文件")
     public ResponseEntity<byte[]> export(SettlementExportRequest request) {
-        byte[] bytes = settlementService.export(request);
+        String username = StpUtil.getLoginIdAsString();
+        String role = getUserRole(username);
+        byte[] bytes = settlementService.export(request, username, role);
         return ResponseEntity.ok()
             .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=settlements.xlsx")
             .contentType(MediaType.APPLICATION_OCTET_STREAM)

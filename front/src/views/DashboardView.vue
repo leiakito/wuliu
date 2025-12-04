@@ -233,11 +233,13 @@ const formatCurrency = (n: number, withSymbol = true) => {
 
 onMounted(async () => {
   try {
-    const { data } = await fetchDashboard({});
-    stats.orderCount = data.orderCount ?? 0;
-    stats.waitingSettlementCount = data.waitingSettlementCount ?? 0;
-    stats.totalAmount = Number(data.totalAmount ?? 0);
-    stats.pendingAmount = Number(data.pendingAmount ?? 0);
+    const data = await fetchDashboard({});
+    if (data) {
+      stats.orderCount = data.orderCount ?? 0;
+      stats.waitingSettlementCount = data.waitingSettlementCount ?? 0;
+      stats.totalAmount = Number(data.totalAmount ?? 0);
+      stats.pendingAmount = Number(data.pendingAmount ?? 0);
+    }
   } catch (e) {
     // 静默失败，保留默认 0
     console.warn('加载仪表盘统计失败', e);

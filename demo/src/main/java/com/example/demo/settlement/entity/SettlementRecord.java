@@ -29,6 +29,7 @@ public class SettlementRecord {
     private LocalDate payableAt;
     private String remark;
     private String ownerUsername;
+    private String submitterUsername;
     private LocalDateTime orderTime;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;

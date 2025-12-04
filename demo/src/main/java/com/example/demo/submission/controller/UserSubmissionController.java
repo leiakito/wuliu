@@ -17,7 +17,9 @@ import jakarta.validation.Valid;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.util.StringUtils;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -67,9 +69,17 @@ public class UserSubmissionController {
     }
 
     @GetMapping("/owners")
-    @SaCheckRole("ADMIN")
+    @SaCheckLogin
     @Operation(summary = "归属用户候选", description = "返回系统账号与历史提交中出现过的归属用户/提交人用户名，去重排序")
     public ApiResponse<List<String>> owners() {
         return ApiResponse.ok(userSubmissionService.listOwnerUsernames());
+    }
+
+    @DeleteMapping("/owners/{ownerName}")
+    @SaCheckRole("ADMIN")
+    @Operation(summary = "删除归属人", description = "从归属人列表中删除指定归属人名称")
+    public ApiResponse<Void> deleteOwner(@PathVariable String ownerName) {
+        userSubmissionService.deleteOwner(ownerName);
+        return ApiResponse.ok(null);
     }
 }

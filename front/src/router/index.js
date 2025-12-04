@@ -23,9 +23,9 @@ const routes = [
             },
             {
                 path: 'orders',
-                name: 'orders', //权限限制页面,只要roles 管理员才可以访问
+                name: 'orders',
                 component: () => import('@/views/OrdersView.vue'),
-                meta: { requiresAuth: true, title: '物流单号', roles: ['ADMIN'], keepAlive: true }
+                meta: { requiresAuth: true, title: '物流单号', roles: ['ADMIN', 'USER'], keepAlive: true }
             },
             {
                 path: 'user-submissions',
@@ -49,13 +49,13 @@ const routes = [
                 path: 'settlements',
                 name: 'settlements',
                 component: () => import('@/views/SettlementsView.vue'),
-                meta: { requiresAuth: true, title: '结账管理', roles: ['ADMIN'] }
+                meta: { requiresAuth: true, title: '结账管理', roles: ['ADMIN', 'USER'] }
             },
             {
                 path: 'submission-logs',
                 name: 'submission-logs',
                 component: () => import('@/views/SubmissionLogsView.vue'),
-                meta: { requiresAuth: true, title: '提交记录', roles: ['ADMIN'] }
+                meta: { requiresAuth: true, title: '提交记录', roles: ['ADMIN', 'USER'] }
             },
             {
                 path: 'users',

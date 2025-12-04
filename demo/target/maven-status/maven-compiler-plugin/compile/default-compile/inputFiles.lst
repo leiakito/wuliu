@@ -47,10 +47,12 @@
 /Volumes/GT/wuliudanzi/demo/src/main/java/com/example/demo/submission/service/UserSubmissionLogService.java
 /Volumes/GT/wuliudanzi/demo/src/main/java/com/example/demo/order/dto/BatchFetchRequest.java
 /Volumes/GT/wuliudanzi/demo/src/main/java/com/example/demo/log/service/SysLogService.java
+/Volumes/GT/wuliudanzi/demo/src/main/java/com/example/demo/submission/service/impl/TrackingOwnerServiceImpl.java
 /Volumes/GT/wuliudanzi/demo/src/main/java/com/example/demo/settlement/controller/SettlementController.java
 /Volumes/GT/wuliudanzi/demo/src/main/java/com/example/demo/settlement/dto/SettlementBatchConfirmRequest.java
 /Volumes/GT/wuliudanzi/demo/src/main/java/com/example/demo/report/service/impl/ReportServiceImpl.java
 /Volumes/GT/wuliudanzi/demo/src/main/java/com/example/demo/config/WebMvcConfig.java
+/Volumes/GT/wuliudanzi/demo/src/main/java/com/example/demo/submission/service/TrackingOwnerService.java
 /Volumes/GT/wuliudanzi/demo/src/main/java/com/example/demo/settlement/dto/SettlementBatchSnPriceRequest.java
 /Volumes/GT/wuliudanzi/demo/src/main/java/com/example/demo/submission/mapper/UserSubmissionLogMapper.java
 /Volumes/GT/wuliudanzi/demo/src/main/java/com/example/demo/hardware/service/HardwarePriceService.java

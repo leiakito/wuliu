@@ -348,8 +348,17 @@ public class OrderServiceImpl implements OrderService {
                         new QueryWrapper<OrderCellStyle>().lambda()
                                 .eq(OrderCellStyle::getOrderId, dbLatest.getId())
                 );
+            } else {
+                // Excel中有ID但数据库中不存在（ID已被删除或写错）
+                Long invalidId = r.getId();
+                System.out.println("警告: Excel中的ID=" + invalidId + " 在数据库中不存在（可能已被删除或写错），将清空ID并按运单号+SN匹配");
+                // 标记无效ID，稍后返回给前端
+                r.setId(null);  // 清空ID，继续按运单号+SN匹配
+                // 注意：这里只是标记，实际的 invalidId 记录会在外层循环中添加
             }
-        } else if (StringUtils.hasText(r.getTrackingNumber()) || StringUtils.hasText(r.getSn())) {
+        }
+
+        if (dbLatest == null && (StringUtils.hasText(r.getTrackingNumber()) || StringUtils.hasText(r.getSn()))) {
             // 没有ID，回退到原来的逻辑：按运单号+SN匹配
             LambdaQueryWrapper<OrderRecord> wrapper = new LambdaQueryWrapper<>();
 
@@ -452,6 +461,7 @@ public class OrderServiceImpl implements OrderService {
     private final SettlementService settlementService;
     private final UserSubmissionMapper userSubmissionMapper;
     private final OrderCellStyleMapper orderCellStyleMapper;
+    private final com.example.demo.settlement.mapper.SettlementRecordMapper settlementRecordMapper;
 
     @Override
     @Transactional
@@ -463,6 +473,12 @@ public class OrderServiceImpl implements OrderService {
             List<OrderRecord> needSettlement = new ArrayList<>();
             // 收集样式变更
 
+            // 检测Excel中删除的记录（数据库有但Excel没有）
+            List<OrderRecord> deletedRecords = detectDeletedRecords(records);
+
+            // 检测无效ID（Excel中有ID但数据库中不存在）
+            List<Map<String, Object>> invalidIds = new ArrayList<>();
+
             int skippedUnchanged = 0;
             List<Integer> skippedRows = new ArrayList<>();
             List<OrderRecord> changedRecords = new ArrayList<>();
@@ -473,8 +489,20 @@ public class OrderServiceImpl implements OrderService {
                 }
                 // 变更检测（优先使用ID对齐，次选"运单号+SN"对齐；未命中再按行号以及 tracking 兜底）
                 // 内容/格式/颜色 任一变化才写库；首次见到视为变化
-                Long existingId = record.getId(); // 保存原始ID（如果有）
+                Long originalId = record.getId(); // 保存原始ID（如果有）
                 boolean changed = isChangedAndUpdateBaseline(record, operator);
+
+                // 检测无效ID：Excel中有ID但在isChangedAndUpdateBaseline中被清空了
+                if (originalId != null && originalId > 0 && record.getId() == null) {
+                    // ID被清空了，说明原ID在数据库中不存在
+                    Map<String, Object> invalidIdInfo = new HashMap<>();
+                    invalidIdInfo.put("excelId", originalId);
+                    invalidIdInfo.put("trackingNumber", record.getTrackingNumber());
+                    invalidIdInfo.put("model", record.getModel());
+                    invalidIdInfo.put("sn", record.getSn());
+                    invalidIdInfo.put("excelRowIndex", record.getExcelRowIndex());
+                    invalidIds.add(invalidIdInfo);
+                }
                 if (!changed) {
                     skippedUnchanged++;
                     if (record.getExcelRowIndex() != null) skippedRows.add(record.getExcelRowIndex());
@@ -533,6 +561,27 @@ public class OrderServiceImpl implements OrderService {
                 return m;
             }).toList();
             report.put("styles", styles);
+
+            // 返回待删除的记录列表
+            if (!deletedRecords.isEmpty()) {
+                List<Map<String, Object>> deletedList = deletedRecords.stream().map(r -> {
+                    Map<String, Object> m = new HashMap<>();
+                    m.put("id", r.getId());
+                    m.put("trackingNumber", r.getTrackingNumber());
+                    m.put("model", r.getModel());
+                    m.put("sn", r.getSn());
+                    m.put("amount", r.getAmount());
+                    m.put("remark", r.getRemark());
+                    m.put("orderTime", r.getOrderTime());
+                    return m;
+                }).toList();
+                report.put("deletedRecords", deletedList);
+            }
+
+            // 返回无效ID列表
+            if (!invalidIds.isEmpty()) {
+                report.put("invalidIds", invalidIds);
+            }
 
             return report;
         } catch (IOException e) {
@@ -733,6 +782,57 @@ public class OrderServiceImpl implements OrderService {
                 record.setOwnerUsername(ownerMap.get(record.getTrackingNumber()));
             }
         });
+    }
+
+    /**
+     * 检测Excel中删除的记录（数据库有但Excel没有）
+     * 策略：基于运单号范围检测
+     * - 收集Excel中出现的所有运单号
+     * - 查询数据库中这些运单号的所有记录
+     * - 对比找出数据库有但Excel没有的记录（通过运单号+SN匹配）
+     */
+    private List<OrderRecord> detectDeletedRecords(List<OrderRecord> excelRecords) {
+        if (CollectionUtils.isEmpty(excelRecords)) {
+            return List.of();
+        }
+
+        // 1. 收集Excel中的所有运单号
+        Set<String> excelTrackingNumbers = excelRecords.stream()
+                .map(OrderRecord::getTrackingNumber)
+                .filter(StringUtils::hasText)
+                .collect(Collectors.toSet());
+
+        if (excelTrackingNumbers.isEmpty()) {
+            return List.of();
+        }
+
+        // 2. 查询数据库中这些运单号的所有记录
+        LambdaQueryWrapper<OrderRecord> wrapper = new LambdaQueryWrapper<>();
+        wrapper.in(OrderRecord::getTrackingNumber, excelTrackingNumbers);
+        List<OrderRecord> dbRecords = orderRecordMapper.selectList(wrapper);
+
+        if (CollectionUtils.isEmpty(dbRecords)) {
+            return List.of();
+        }
+
+        // 3. 构建Excel中的记录映射（运单号+SN作为key）
+        Set<String> excelKeys = excelRecords.stream()
+                .filter(r -> StringUtils.hasText(r.getTrackingNumber()) && StringUtils.hasText(r.getSn()))
+                .map(r -> r.getTrackingNumber().toUpperCase() + "#" + r.getSn().toUpperCase())
+                .collect(Collectors.toSet());
+
+        // 4. 找出数据库有但Excel没有的记录
+        List<OrderRecord> deletedRecords = dbRecords.stream()
+                .filter(db -> {
+                    if (!StringUtils.hasText(db.getTrackingNumber()) || !StringUtils.hasText(db.getSn())) {
+                        return false;
+                    }
+                    String dbKey = db.getTrackingNumber().toUpperCase() + "#" + db.getSn().toUpperCase();
+                    return !excelKeys.contains(dbKey);
+                })
+                .collect(Collectors.toList());
+
+        return deletedRecords;
     }
 
     private void persistOrderStyles(OrderRecord r) {
@@ -1305,6 +1405,92 @@ public class OrderServiceImpl implements OrderService {
         wrapper.eq(UserSubmission::getTrackingNumber, trackingNumber.trim())
                 .ne(UserSubmission::getStatus, "COMPLETED");
         return userSubmissionMapper.selectCount(wrapper) > 0;
+    }
+
+    @Override
+    @Transactional
+    @CacheEvict(value = "orders", allEntries = true)
+    public void deleteWithRelations(Long id) {
+        if (id == null || id <= 0) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "无效的订单ID");
+        }
+
+        // 先查询订单的运单号，用于删除关联的提交记录
+        OrderRecord order = orderRecordMapper.selectById(id);
+        if (order == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "订单不存在");
+        }
+
+        // 1. 删除订单样式
+        orderCellStyleMapper.delete(
+                new QueryWrapper<OrderCellStyle>().lambda()
+                        .eq(OrderCellStyle::getOrderId, id)
+        );
+
+        // 2. 删除关联的结账记录
+        settlementRecordMapper.delete(
+                new QueryWrapper<com.example.demo.settlement.entity.SettlementRecord>().lambda()
+                        .eq(com.example.demo.settlement.entity.SettlementRecord::getOrderId, id)
+        );
+
+        // 3. 删除关联的提交记录（根据运单号）
+        if (StringUtils.hasText(order.getTrackingNumber())) {
+            userSubmissionMapper.delete(
+                    new QueryWrapper<UserSubmission>().lambda()
+                            .eq(UserSubmission::getTrackingNumber, order.getTrackingNumber())
+            );
+        }
+
+        // 4. 删除订单记录
+        orderRecordMapper.deleteById(id);
+    }
+
+    @Override
+    @Transactional
+    @CacheEvict(value = "orders", allEntries = true)
+    public void batchDeleteWithRelations(List<Long> ids) {
+        if (CollectionUtils.isEmpty(ids)) {
+            return;
+        }
+
+        // 过滤无效ID
+        List<Long> validIds = ids.stream()
+                .filter(id -> id != null && id > 0)
+                .collect(Collectors.toList());
+
+        if (validIds.isEmpty()) {
+            return;
+        }
+
+        // 先查询所有订单的运单号，用于删除关联的提交记录
+        List<OrderRecord> orders = orderRecordMapper.selectBatchIds(validIds);
+        Set<String> trackingNumbers = orders.stream()
+                .map(OrderRecord::getTrackingNumber)
+                .filter(StringUtils::hasText)
+                .collect(Collectors.toSet());
+
+        // 1. 批量删除订单样式
+        orderCellStyleMapper.delete(
+                new QueryWrapper<OrderCellStyle>().lambda()
+                        .in(OrderCellStyle::getOrderId, validIds)
+        );
+
+        // 2. 批量删除关联的结账记录
+        settlementRecordMapper.delete(
+                new QueryWrapper<com.example.demo.settlement.entity.SettlementRecord>().lambda()
+                        .in(com.example.demo.settlement.entity.SettlementRecord::getOrderId, validIds)
+        );
+
+        // 3. 批量删除关联的提交记录（根据运单号）
+        if (!trackingNumbers.isEmpty()) {
+            userSubmissionMapper.delete(
+                    new QueryWrapper<UserSubmission>().lambda()
+                            .in(UserSubmission::getTrackingNumber, trackingNumbers)
+            );
+        }
+
+        // 4. 批量删除订单记录
+        orderRecordMapper.deleteBatchIds(validIds);
     }
 }
 

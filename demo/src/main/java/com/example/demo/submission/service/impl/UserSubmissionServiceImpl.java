@@ -16,6 +16,7 @@ import com.example.demo.submission.dto.UserSubmissionCreateRequest;
 import com.example.demo.submission.dto.UserSubmissionQueryRequest;
 import com.example.demo.submission.entity.UserSubmission;
 import com.example.demo.submission.mapper.UserSubmissionMapper;
+import com.example.demo.submission.service.TrackingOwnerService;
 import com.example.demo.submission.service.UserSubmissionLogService;
 import com.example.demo.submission.service.UserSubmissionService;
 import java.time.LocalDate;
@@ -43,6 +44,7 @@ public class UserSubmissionServiceImpl implements UserSubmissionService {
     private final OrderRecordMapper orderRecordMapper;
     private final UserSubmissionLogService userSubmissionLogService;
     private final SysUserMapper sysUserMapper;
+    private final TrackingOwnerService trackingOwnerService;
 
     @Override
     @Transactional
@@ -78,24 +80,33 @@ public class UserSubmissionServiceImpl implements UserSubmissionService {
 
     @Override
     public IPage<UserSubmission> pageMine(UserSubmissionQueryRequest request, String username) {
-        return pageInternal(request, username, false);
+        return pageInternal(request, username, false, true);
     }
 
     @Override
     public IPage<UserSubmission> pageAll(UserSubmissionQueryRequest request) {
-        return pageInternal(request, null, true);
+        return pageInternal(request, null, true, false);
     }
 
-    private IPage<UserSubmission> pageInternal(UserSubmissionQueryRequest request, String forcedUsername, boolean allowUsernameFilter) {
+    private IPage<UserSubmission> pageInternal(UserSubmissionQueryRequest request, String forcedUsername, boolean allowUsernameFilter, boolean queryBySubmitter) {
         long current = request.getPage() == null || request.getPage() < 1 ? 1 : request.getPage();
         long size = request.getSize() == null || request.getSize() <= 0 ? 10 : request.getSize();
         Page<UserSubmission> page = Page.of(current, size);
         LambdaQueryWrapper<UserSubmission> wrapper = new LambdaQueryWrapper<>();
+
         if (forcedUsername != null) {
-            wrapper.eq(UserSubmission::getOwnerUsername, forcedUsername);
+            // 如果是查询"我的提交"，按提交人字段查询
+            if (queryBySubmitter) {
+                wrapper.eq(UserSubmission::getUsername, forcedUsername);
+            } else {
+                // 否则按归属人字段查询
+                wrapper.eq(UserSubmission::getOwnerUsername, forcedUsername);
+            }
         } else if (allowUsernameFilter && StringUtils.hasText(request.getUsername())) {
+            // 管理员视图的归属人筛选
             wrapper.eq(UserSubmission::getOwnerUsername, request.getUsername().trim());
         }
+
         if (StringUtils.hasText(request.getStatus())) {
             wrapper.eq(UserSubmission::getStatus, request.getStatus().trim());
         }
@@ -111,33 +122,26 @@ public class UserSubmissionServiceImpl implements UserSubmissionService {
 
     @Override
     public List<String> listOwnerUsernames() {
-        // 1) 系统账号用户名
-        List<SysUser> sysUsers = sysUserMapper.selectList(null);
-        Set<String> set = new TreeSet<>(String::compareToIgnoreCase);
-        for (SysUser u : sysUsers) {
-            if (u != null && StringUtils.hasText(u.getUsername())) {
-                set.add(u.getUsername().trim());
-            }
+        // 从 JSON 文件获取所有归属人名称
+        return trackingOwnerService.listOwnerNames();
+    }
+
+    @Override
+    public void deleteOwner(String ownerName) {
+        if (!StringUtils.hasText(ownerName)) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "归属人名称不能为空");
         }
-        // 2) 提交中的 ownerUsername
-        LambdaQueryWrapper<UserSubmission> ownerQ = new LambdaQueryWrapper<>();
-        ownerQ.select(UserSubmission::getOwnerUsername);
-        List<UserSubmission> ownerRows = userSubmissionMapper.selectList(ownerQ);
-        for (UserSubmission r : ownerRows) {
-            if (r != null && StringUtils.hasText(r.getOwnerUsername())) {
-                set.add(r.getOwnerUsername().trim());
-            }
+        // 查找所有使用该归属人的单号
+        Map<String, String> allOwners = trackingOwnerService.getAllOwners();
+        List<String> affectedTrackings = allOwners.entrySet().stream()
+            .filter(entry -> ownerName.trim().equals(entry.getValue()))
+            .map(Map.Entry::getKey)
+            .collect(Collectors.toList());
+
+        // 删除这些单号的归属关系
+        for (String trackingNumber : affectedTrackings) {
+            trackingOwnerService.removeOwner(trackingNumber);
         }
-        // 3) 提交中的 username（提交人）
-        LambdaQueryWrapper<UserSubmission> submitterQ = new LambdaQueryWrapper<>();
-        submitterQ.select(UserSubmission::getUsername);
-        List<UserSubmission> submitterRows = userSubmissionMapper.selectList(submitterQ);
-        for (UserSubmission r : submitterRows) {
-            if (r != null && StringUtils.hasText(r.getUsername())) {
-                set.add(r.getUsername().trim());
-            }
-        }
-        return new ArrayList<>(set);
     }
 
     private void syncSettlement(String trackingNumber) {
@@ -288,6 +292,10 @@ public class UserSubmissionServiceImpl implements UserSubmissionService {
         }
         String normalized = trackingNumber.trim();
         ensureNotSubmitted(normalized);
+
+        // 将归属关系存入 JSON 文件
+        trackingOwnerService.setOwner(normalized, ownerUsername.trim());
+
         UserSubmission submission = new UserSubmission();
         submission.setUsername(submitter.trim());
         submission.setOwnerUsername(ownerUsername.trim());

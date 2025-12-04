@@ -34,4 +34,14 @@ public interface OrderService {
     List<OrderCategoryStats> listCategoryStats(OrderFilterRequest request);
 
     List<OrderRecord> syncFromThirdParty(BatchFetchRequest request, String operator);
+
+    /**
+     * 级联删除订单及关联数据（订单、样式、结账记录）
+     */
+    void deleteWithRelations(Long id);
+
+    /**
+     * 批量级联删除订单
+     */
+    void batchDeleteWithRelations(List<Long> ids);
 }

@@ -11,5 +11,6 @@ public class SettlementExportRequest {
     private String status;
     private String batch;
     private String ownerUsername;
+    private String submitterUsername;
     private List<String> trackingNumbers;
 }

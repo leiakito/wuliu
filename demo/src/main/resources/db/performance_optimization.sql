@@ -170,6 +170,109 @@ SET @sql := IF(@need > 0,
 );
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
+-- =============================
+-- E. user_submission 表迁移与索引（幂等）
+-- 目标：确保存在提交人(username)与归属用户(owner_username)列及相关索引
+-- =============================
+
+-- 1) 若无 owner_username 列则新增（可空）
+SET @need := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'user_submission'
+    AND COLUMN_NAME = 'owner_username'
+);
+SET @sql := IF(@need = 0,
+  'ALTER TABLE user_submission ADD COLUMN owner_username VARCHAR(64) NULL AFTER username',
+  'DO 0'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+-- 2) 若无 username 列则新增（先允许为空，后回填，再设为 NOT NULL）
+SET @need := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'user_submission'
+    AND COLUMN_NAME = 'username'
+);
+SET @sql := IF(@need = 0,
+  'ALTER TABLE user_submission ADD COLUMN username VARCHAR(64) NULL AFTER id',
+  'DO 0'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+-- 2.1) 回填 username（为空的用 owner_username，否则用 "system"）
+SET @need := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'user_submission'
+    AND COLUMN_NAME = 'username'
+    AND IS_NULLABLE = 'YES'
+);
+SET @sql := IF(@need > 0,
+  'UPDATE user_submission SET username = COALESCE(NULLIF(TRIM(username), ''''), NULLIF(TRIM(owner_username), ''''), ''system'') WHERE username IS NULL OR TRIM(username) = ''''',
+  'DO 0'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+-- 2.2) 设 username 非空
+SET @need := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'user_submission'
+    AND COLUMN_NAME = 'username'
+    AND IS_NULLABLE = 'YES'
+);
+SET @sql := IF(@need > 0,
+  'ALTER TABLE user_submission MODIFY username VARCHAR(64) NOT NULL',
+  'DO 0'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+-- 3) 幂等创建索引
+SET @tbl := 'user_submission';
+
+SET @idx := 'idx_submission_status';
+SET @exists := (SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = @tbl AND index_name = @idx);
+SET @sql := IF(@exists = 0, CONCAT('CREATE INDEX ', @idx, ' ON ', @tbl, '(status)'), 'DO 0');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @idx := 'idx_submission_date';
+SET @exists := (SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = @tbl AND index_name = @idx);
+SET @sql := IF(@exists = 0, CONCAT('CREATE INDEX ', @idx, ' ON ', @tbl, '(submission_date)'), 'DO 0');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @idx := 'idx_submission_owner';
+SET @exists := (SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = @tbl AND index_name = @idx);
+SET @sql := IF(@exists = 0, CONCAT('CREATE INDEX ', @idx, ' ON ', @tbl, '(owner_username)'), 'DO 0');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @idx := 'idx_submission_username';
+SET @exists := (SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = @tbl AND index_name = @idx);
+SET @sql := IF(@exists = 0, CONCAT('CREATE INDEX ', @idx, ' ON ', @tbl, '(username)'), 'DO 0');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+-- 4) 幂等创建唯一索引（防重复提交同一单号）
+SET @idx := 'uk_submission_tracking';
+SET @exists := (SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = @tbl AND index_name = @idx);
+SET @sql := IF(@exists = 0, CONCAT('CREATE UNIQUE INDEX ', @idx, ' ON ', @tbl, '(tracking_number)'), 'DO 0');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+-- =============================
+-- F. settlement_record 添加 submitter_username 字段（幂等）
+-- =============================
+SET @need := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'settlement_record'
+    AND COLUMN_NAME = 'submitter_username'
+);
+SET @sql := IF(@need = 0,
+  'ALTER TABLE settlement_record ADD COLUMN submitter_username VARCHAR(64) AFTER owner_username',
+  'DO 0'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
 -- 验证（按需执行）
 -- EXPLAIN SELECT * FROM settlement_record WHERE order_id IN (SELECT id FROM order_record WHERE UPPER(sn) = 'TEST');
 -- EXPLAIN SELECT * FROM settlement_record WHERE status = 'PENDING' ORDER BY order_time DESC LIMIT 20;

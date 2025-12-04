@@ -36,7 +36,7 @@ public class OrderController {
     private final OrderService orderService;
 
     @GetMapping
-    @SaCheckRole("ADMIN")
+    @SaCheckLogin
     @Operation(summary = "分页查询订单", description = "支持按日期、分类、状态与关键字筛选物流单号")
     public ApiResponse<PageResponse<OrderRecord>> page(OrderFilterRequest request) {
         // 防御性验证：确保 page 和 size 参数有效
@@ -51,7 +51,7 @@ public class OrderController {
     }
 
     @PostMapping
-    @SaCheckRole("ADMIN")
+    @SaCheckLogin
     @LogOperation("新增物流单号")
     @Operation(summary = "新增物流单号", description = "录入单条物流单号及相关信息")
     public ApiResponse<OrderRecord> create(@Valid @RequestBody OrderCreateRequest request) {
@@ -59,7 +59,7 @@ public class OrderController {
     }
 
     @PostMapping("/import")
-    @SaCheckRole("ADMIN")
+    @SaCheckLogin
     @LogOperation("批量导入物流单号")
     @Operation(summary = "批量导入", description = "上传 Excel 以批量导入物流单号")
     public ApiResponse<Map<String, Object>> importExcel(
@@ -85,7 +85,7 @@ public class OrderController {
     }
 
     @PatchMapping("/{id}/status")
-    @SaCheckRole("ADMIN")
+    @SaCheckLogin
     @LogOperation("更新订单状态")
     @Operation(summary = "更新订单状态", description = "根据订单 ID 更新当前物流单状态")
     public ApiResponse<Void> changeStatus(
@@ -97,7 +97,7 @@ public class OrderController {
     }
 
     @PatchMapping("/{id}/amount")
-    @SaCheckRole("ADMIN")
+    @SaCheckLogin
     @LogOperation("更新订单金额")
     @Operation(summary = "更新金额", description = "根据订单 ID 设置/修改金额和备注")
     public ApiResponse<Void> changeAmount(
@@ -108,7 +108,7 @@ public class OrderController {
     }
 
     @PutMapping("/{id}")
-    @SaCheckRole("ADMIN")
+    @SaCheckLogin
     @LogOperation("编辑物流单号")
     @Operation(summary = "编辑物流单号", description = "修改运单号/型号/SN/金额/状态/备注")
     public ApiResponse<OrderRecord> update(
@@ -122,5 +122,23 @@ public class OrderController {
     @Operation(summary = "物流分类统计", description = "基于筛选条件返回各物流公司数量")
     public ApiResponse<List<OrderCategoryStats>> categories(OrderFilterRequest request) {
         return ApiResponse.ok(orderService.listCategoryStats(request));
+    }
+
+    @DeleteMapping("/{id}")
+    @SaCheckLogin
+    @LogOperation("删除订单")
+    @Operation(summary = "删除订单及关联数据", description = "级联删除订单、样式、结账记录")
+    public ApiResponse<Void> delete(@Parameter(description = "订单ID", required = true) @PathVariable Long id) {
+        orderService.deleteWithRelations(id);
+        return ApiResponse.ok();
+    }
+
+    @DeleteMapping("/batch")
+    @SaCheckLogin
+    @LogOperation("批量删除订单")
+    @Operation(summary = "批量删除订单", description = "批量级联删除订单及关联数据")
+    public ApiResponse<Void> batchDelete(@RequestBody List<Long> ids) {
+        orderService.batchDeleteWithRelations(ids);
+        return ApiResponse.ok();
     }
 }

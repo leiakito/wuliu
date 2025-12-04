@@ -45,23 +45,23 @@ public class HardwarePriceController {
     }
 
     @PostMapping
-    @SaCheckRole("ADMIN")
+    @SaCheckLogin
     @LogOperation("新增硬件价格")
-    @Operation(summary = "新增价格", description = "管理员新增当日硬件价格")
+    @Operation(summary = "新增价格", description = "新增当日硬件价格")
     public ApiResponse<HardwarePrice> create(@Valid @RequestBody HardwarePriceRequest request) {
         return ApiResponse.ok(hardwarePriceService.create(request, StpUtil.getLoginIdAsString()));
     }
 
     @PostMapping("/batch")
-    @SaCheckRole("ADMIN")
+    @SaCheckLogin
     @LogOperation("批量新增硬件价格")
-    @Operation(summary = "批量录入价格", description = "管理员可批量导入多条硬件价格")
+    @Operation(summary = "批量录入价格", description = "批量导入多条硬件价格")
     public ApiResponse<List<HardwarePrice>> batchCreate(@Valid @RequestBody HardwarePriceBatchRequest request) {
         return ApiResponse.ok(hardwarePriceService.batchCreate(request.getItems(), StpUtil.getLoginIdAsString()));
     }
 
     @PostMapping("/import")
-    @SaCheckRole("ADMIN")
+    @SaCheckLogin
     @LogOperation("导入硬件价格")
     @Operation(summary = "导入Excel", description = "上传 Excel 按日期批量导入硬件价格")
     public ApiResponse<List<HardwarePrice>> importExcel(
@@ -72,7 +72,7 @@ public class HardwarePriceController {
     }
 
     @PostMapping("/import/batch")
-    @SaCheckRole("ADMIN")
+    @SaCheckLogin
     @LogOperation("批量导入硬件价格")
     @Operation(summary = "批量导入Excel", description = "支持多文件上传，自动从文件名解析日期")
     public ApiResponse<List<HardwarePriceImportResult>> importExcelBatch(
@@ -82,17 +82,17 @@ public class HardwarePriceController {
     }
 
     @PutMapping("/{id}")
-    @SaCheckRole("ADMIN")
+    @SaCheckLogin
     @LogOperation("更新硬件价格")
-    @Operation(summary = "更新价格", description = "管理员编辑硬件价格")
+    @Operation(summary = "更新价格", description = "编辑硬件价格")
     public ApiResponse<HardwarePrice> update(@PathVariable Long id, @Valid @RequestBody HardwarePriceRequest request) {
         return ApiResponse.ok(hardwarePriceService.update(id, request));
     }
 
     @DeleteMapping("/{id}")
-    @SaCheckRole("ADMIN")
+    @SaCheckLogin
     @LogOperation("删除硬件价格")
-    @Operation(summary = "删除价格", description = "管理员删除当日价格记录")
+    @Operation(summary = "删除价格", description = "删除当日价格记录")
     public ApiResponse<Void> delete(@PathVariable Long id) {
         hardwarePriceService.delete(id);
         return ApiResponse.ok();

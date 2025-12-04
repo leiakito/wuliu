@@ -3,16 +3,16 @@
     <div class="page-header">
       <div>
         <h2>物流单号</h2>
-        <p class="sub">管理员可录入与维护，普通用户仅可查询并跟踪状态</p>
+        <p class="sub">管理订单信息,支持批量导入和单个新增</p>
       </div>
-      <div v-if="isAdmin" class="actions">
+      <div class="actions">
         <input ref="fileInput" type="file" accept=".xls,.xlsx" hidden @change="handleFileChange" />
         <el-button @click="triggerImport">批量导入</el-button>
         <el-button type="primary" @click="openCreateDrawer">新增单号</el-button>
       </div>
     </div>
 
-    <el-card v-if="isAdmin">
+    <el-card>
       <el-form :inline="true" :model="filters" class="filter-form">
         <el-form-item label="日期">
           <el-date-picker
@@ -29,7 +29,7 @@
             <el-option v-for="item in statusOptions" :key="item.value" :label="item.label" :value="item.value" />
           </el-select>
         </el-form-item>
-        <el-form-item label="归属用户" v-if="isAdmin">
+        <el-form-item label="归属用户">
           <el-select v-model="filters.ownerUsername" filterable clearable placeholder="全部" style="width: 200px" :loading="userLoading">
             <el-option
               v-for="user in userOptions"
@@ -52,7 +52,7 @@
       </el-form>
     </el-card>
 
-    <el-card v-else class="user-search-card">
+    <el-card v-if="false" class="user-search-card">
       <template #header>
         <div class="settle-bar">
           <span>订单状态查询</span>
@@ -96,7 +96,7 @@
     </div>
 
     <!-- 数据变更提醒列表 -->
-    <el-card v-if="isAdmin && diffNotices.length > 0" class="diff-notice-card">
+    <el-card v-if="diffNotices.length > 0" class="diff-notice-card">
       <template #header>
         <div class="diff-notice-header">
           <div class="header-left">
@@ -112,23 +112,63 @@
       </template>
 
       <el-table :data="diffNotices" size="small" max-height="300">
-        <el-table-column prop="trackingNumber" label="运单号" width="160" />
-        <el-table-column label="变更字段" width="220">
+        <el-table-column prop="trackingNumber" label="运单号" width="160">
           <template #default="{ row }">
-            <el-tag
-              v-for="field in diffFields(row)"
-              :key="field"
-              type="warning"
-              size="small"
-              style="margin-right: 4px;"
-            >
-              {{ field }}
+            <div :style="{ color: row.isDelete ? '#f56c6c' : 'inherit', fontWeight: row.isDelete ? '600' : 'normal' }">
+              {{ row.trackingNumber }}
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column label="变更类型" width="100">
+          <template #default="{ row }">
+            <el-tag v-if="row.isDelete" type="danger" size="small">
+              <i class="el-icon-delete" style="margin-right: 4px;"></i>删除
             </el-tag>
+            <el-tag v-else-if="row.isInvalidId" type="danger" size="small">
+              <i class="el-icon-warning-filled" style="margin-right: 4px;"></i>无效ID
+            </el-tag>
+            <el-tag v-else type="warning" size="small">变更</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="详细信息" width="280">
+          <template #default="{ row }">
+            <div v-if="row.isDelete" class="delete-info">
+              <div class="delete-item"><span class="field-name">型号:</span> {{ row.model || '-' }}</div>
+              <div class="delete-item"><span class="field-name">SN:</span> {{ row.sn || '-' }}</div>
+              <div class="delete-item warning-text">
+                <i class="el-icon-warning" style="margin-right: 4px;"></i>
+                将同时删除关联的结账记录
+              </div>
+            </div>
+            <div v-else-if="row.isInvalidId" class="invalid-id-info">
+              <div class="invalid-id-item"><span class="field-name">Excel ID:</span> <span class="invalid-value">{{ row.excelId }}</span></div>
+              <div class="invalid-id-item"><span class="field-name">运单号:</span> {{ row.trackingNumber }}</div>
+              <div class="invalid-id-item"><span class="field-name">型号:</span> {{ row.model || '-' }}</div>
+              <div class="invalid-id-item"><span class="field-name">SN:</span> {{ row.sn || '-' }}</div>
+              <div class="invalid-id-item warning-text">
+                <i class="el-icon-info" style="margin-right: 4px;"></i>
+                已按运单号+SN匹配或插入新记录
+              </div>
+            </div>
+            <div v-else>
+              <el-tag
+                v-for="field in diffFields(row)"
+                :key="field"
+                type="warning"
+                size="small"
+                style="margin-right: 4px;"
+              >
+                {{ field }}
+              </el-tag>
+            </div>
           </template>
         </el-table-column>
         <el-table-column label="变更详情">
           <template #default="{ row }">
-            <div class="diff-details">
+            <div v-if="row.isInvalidId" class="invalid-id-warning">
+              Excel中的ID不存在于数据库（可能已被删除或填写错误），系统已按运单号+SN自动匹配
+            </div>
+            <div v-else-if="!row.isDelete" class="diff-details">
               <div
                 v-for="field in diffFields(row)"
                 :key="field"
@@ -140,11 +180,30 @@
                 <span class="new-value">{{ formatDiffValue(row.after, field) }}</span>
               </div>
             </div>
+            <div v-else class="delete-warning">
+              Excel中已删除此记录，需要手动确认是否从数据库中删除
+            </div>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="80">
+        <el-table-column label="操作" width="120">
           <template #default="{ row }">
-            <el-button text type="danger" size="small" @click="removeDiffNotice(row)">清除</el-button>
+            <el-button
+              v-if="row.isDelete"
+              type="danger"
+              size="small"
+              @click="handleConfirmDelete(row)"
+            >
+              确认删除
+            </el-button>
+            <el-button
+              v-else
+              text
+              type="primary"
+              size="small"
+              @click="removeDiffNotice(row)"
+            >
+              {{ row.isInvalidId ? '知道了' : '清除' }}
+            </el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -212,7 +271,7 @@
             </el-tag>
           </template>
         </el-table-column >
-        <el-table-column v-if="isAdmin" label="导入状态" width="140">
+        <el-table-column label="导入状态" width="140">
           <template #default="{ row }">
             <span v-if="row.imported" class="status-text">已录入系统</span>
             <span v-else>-</span>
@@ -223,15 +282,14 @@
             <span :style="styleFor(row, 'remark')">{{ row.remark }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="创建人" prop="createdBy" width="120" />
-        <el-table-column v-if="isAdmin" label="操作" width="120">
+        <el-table-column label="提交人" prop="createdBy" width="120" />
+        <el-table-column label="操作" width="120">
           <template #default="{ row }">
             <el-button link type="primary" @click="openEditDialog(row)">编辑</el-button>
           </template>
         </el-table-column>
       </el-table>
       <el-pagination
-        v-if="isAdmin"
         v-model:current-page="filters.page"
         v-model:page-size="filters.size"
         :page-sizes="[20, 50, 100, 200]"
@@ -244,7 +302,7 @@
       />
     </el-card>
 
-    <el-drawer v-if="isAdmin" v-model="createVisible" title="新增物流单" size="30%" :close-on-click-modal="false">
+    <el-drawer v-model="createVisible" title="新增物流单" size="30%" :close-on-click-modal="false" :destroy-on-close="true">
       <el-form ref="createFormRef" :model="createForm" :rules="createRules" label-width="90px">
         <el-form-item label="日期" prop="orderDate">
           <el-date-picker v-model="createForm.orderDate" type="date" value-format="YYYY-MM-DD" />
@@ -268,7 +326,7 @@
       </template>
     </el-drawer>
 
-    <el-dialog v-if="isAdmin" v-model="editDialog.visible" title="编辑物流单号" width="520px">
+    <el-dialog v-model="editDialog.visible" title="编辑物流单号" width="520px" :destroy-on-close="true">
       <el-form label-width="90px">
         <el-form-item label="运单号">
           <el-input v-model="editDialog.form.trackingNumber" />
@@ -332,9 +390,9 @@ export default {
 <script setup lang="ts">
 import { computed, reactive, ref, watch, onBeforeUnmount, onMounted, onActivated, onDeactivated } from 'vue';
 import type { FormInstance, FormRules } from 'element-plus';
-import { ElMessage } from 'element-plus';
+import { ElMessage, ElMessageBox } from 'element-plus';
 import { ArrowUp } from '@element-plus/icons-vue';
-import { fetchOrders, createOrder, importOrders, updateOrderStatus, searchOrders, fetchCategoryStats, updateOrder } from '@/api/orders';
+import { fetchOrders, createOrder, importOrders, updateOrderStatus, searchOrders, fetchCategoryStats, updateOrder, deleteOrder } from '@/api/orders';
 import { listUsers } from '@/api/users';
 import { listOwnerUsernames } from '@/api/submissions';
 import type { OrderCategoryStats, OrderCreateRequest, OrderRecord, OrderUpdateRequest, SysUser } from '@/types/models';
@@ -382,6 +440,13 @@ interface DiffNotice {
   before?: Partial<OrderRecord>;
   after?: Partial<OrderRecord>;
   ts?: number;
+  isDelete?: boolean;  // 是否为删除类型
+  recordId?: number;   // 记录ID（用于删除）
+  model?: string;      // 型号
+  sn?: string;         // SN
+  isInvalidId?: boolean; // 是否为无效ID类型
+  excelId?: number;    // Excel中的无效ID
+  excelRowIndex?: number; // Excel行号
 }
 
 interface StyleChangeItem {
@@ -514,8 +579,9 @@ const userSearchInput = ref('');
 const userSearchLoading = ref(false);
 const userSearchDebounce = ref<number | null>(null);
 const adminSearchDebounce = ref<number | null>(null);
-const tableData = computed(() => (isAdmin.value ? orders.value : userOrders.value));
-const tableLoading = computed(() => (isAdmin.value ? loading.value : userSearchLoading.value));
+// 所有用户都使用同样的数据源
+const tableData = computed(() => orders.value);
+const tableLoading = computed(() => loading.value);
 const USER_HISTORY_KEY = 'user-order-history';
 const quickStatus = ref('');
 
@@ -524,7 +590,7 @@ const userOptions = ref<SysUser[]>([]);
 const userLoading = ref(false);
 
 const loadUsers = async () => {
-  if (!isAdmin.value) return;
+  // 所有用户都可以加载用户列表（用于归属用户筛选）
   userLoading.value = true;
   try {
     const [sysUsers, ownerNames] = await Promise.all([
@@ -733,9 +799,7 @@ const buildFilterPayload = () => {
 };
 
 const loadOrders = async () => {
-  if (!isAdmin.value) {
-    return;
-  }
+  // 所有登录用户都可以加载订单数据
   loading.value = true;
   try {
     const params = queryParams.value;
@@ -751,15 +815,16 @@ const loadOrders = async () => {
   }
 };
 
-const handleSearch = () => {
+const handleSearch = async () => {
   // 统一在点击查询时进行清洗，避免Excel前缀等脏数据
   filters.keyword = sanitizeSingleInput(filters.keyword);
   filters.page = 1;
-  loadOrders();
+  // 所有用户都使用统一的查询接口
+  await loadOrders();
 };
 
 const triggerAdminAutoSearch = () => {
-  if (!isAdmin.value) return;
+  // 所有用户都可以使用自动搜索
   if (adminSearchDebounce.value) {
     clearTimeout(adminSearchDebounce.value);
   }
@@ -818,7 +883,7 @@ const resetFilters = () => {
 };
 
 const triggerImport = () => {
-  if (!isAdmin.value) return;
+  // 所有用户都可以批量导入
   fileInput.value?.click();
 };
 
@@ -892,6 +957,47 @@ const removeDiffNotice = (row: DiffNotice) => {
   ElMessage.success('已清除该条提醒');
 };
 
+// 确认删除订单及关联数据
+const handleConfirmDelete = async (row: DiffNotice) => {
+  if (!row.recordId) {
+    ElMessage.error('缺少记录ID，无法删除');
+    return;
+  }
+
+  try {
+    // 显示确认对话框
+    await ElMessageBox.confirm(
+      `确认删除以下记录及其关联数据？\n\n运单号: ${row.trackingNumber}\n型号: ${row.model || '-'}\nSN: ${row.sn || '-'}\n\n此操作将同时删除：\n• 订单记录\n• 订单样式\n• 结账记录\n\n此操作不可撤销！`,
+      '确认删除',
+      {
+        confirmButtonText: '确认删除',
+        cancelButtonText: '取消',
+        type: 'warning',
+        dangerouslyUseHTMLString: false
+      }
+    );
+
+    // 调用删除API
+    await deleteOrder(row.recordId);
+
+    // 从提醒列表中移除
+    diffNotices.value = diffNotices.value.filter(n => n.recordId !== row.recordId);
+    saveDiffNoticesToCache();
+
+    // 刷新订单列表
+    await loadOrders();
+
+    ElMessage.success('删除成功');
+  } catch (error: any) {
+    if (error === 'cancel') {
+      ElMessage.info('已取消删除');
+    } else {
+      console.error('删除失败:', error);
+      ElMessage.error('删除失败: ' + (error.message || '未知错误'));
+    }
+  }
+};
+
 const startImportProgress = () => {
   importProgress.visible = true;
   importProgress.percent = 10;
@@ -918,7 +1024,7 @@ const finishImportProgress = () => {
 };
 
 const handleFileChange = async (event: Event) => {
-  if (!isAdmin.value) return;
+  // 所有用户都可以处理文件上传
   const target = event.target as HTMLInputElement;
   const file = target.files?.[0];
   if (!file) return;
@@ -964,6 +1070,49 @@ const handleFileChange = async (event: Event) => {
     // 重新加载订单并计算差异
     await loadOrders();
 
+    // 处理删除的记录
+    if (Array.isArray(report?.deletedRecords) && report.deletedRecords.length > 0) {
+      const deletedNotices = report.deletedRecords.map((deleted: any) => ({
+        trackingNumber: deleted.trackingNumber || '未知',
+        model: deleted.model,
+        sn: deleted.sn,
+        message: `🗑️ Excel中已删除，需要确认是否从数据库删除`,
+        isDelete: true,  // 标记为删除类型
+        recordId: deleted.id,  // 保存记录ID用于删除
+        before: deleted,
+        after: null,
+        ts: Date.now()
+      }));
+      mergeDiffNotices(deletedNotices);
+      ElMessage.warning({
+        message: `检测到 ${report.deletedRecords.length} 条记录在Excel中已删除，请查看提醒并确认`,
+        duration: 10000,
+        showClose: true
+      });
+    }
+
+    // 处理无效ID
+    if (Array.isArray(report?.invalidIds) && report.invalidIds.length > 0) {
+      const invalidIdNotices = report.invalidIds.map((invalid: any) => ({
+        trackingNumber: invalid.trackingNumber || '未知',
+        model: invalid.model,
+        sn: invalid.sn,
+        message: `⚠️ Excel中的ID=${invalid.excelId}不存在于数据库`,
+        isInvalidId: true,  // 标记为无效ID类型
+        excelId: invalid.excelId,
+        excelRowIndex: invalid.excelRowIndex,
+        before: null,
+        after: { trackingNumber: invalid.trackingNumber, model: invalid.model, sn: invalid.sn },
+        ts: Date.now()
+      }));
+      mergeDiffNotices(invalidIdNotices);
+      ElMessage.warning({
+        message: `检测到 ${report.invalidIds.length} 个无效ID，系统已按运单号+SN自动匹配`,
+        duration: 8000,
+        showClose: true
+      });
+    }
+
     // 导入后计算差异
     if (prevSnapshot) {
       try {
@@ -984,12 +1133,12 @@ const handleFileChange = async (event: Event) => {
 };
 
 const openCreateDrawer = () => {
-  if (!isAdmin.value) return;
+  // 所有用户都可以新增订单
   createVisible.value = true;
 };
 
 const openEditDialog = (row: OrderRecord) => {
-  if (!isAdmin.value) return;
+  // 所有用户都可以编辑订单
   editDialog.targetId = row.id;
   editDialog.form.trackingNumber = row.trackingNumber;
   editDialog.form.model = row.model ?? '';
@@ -1001,7 +1150,7 @@ const openEditDialog = (row: OrderRecord) => {
 };
 
 const submitCreate = async () => {
-  if (!isAdmin.value) return;
+  // 所有用户都可以提交创建
   if (!createFormRef.value) return;
   const valid = await createFormRef.value.validate().catch(() => false);
   if (!valid) return;
@@ -1034,7 +1183,7 @@ const submitCreate = async () => {
 };
 
 const changeStatus = async (row: OrderRecord, status: string) => {
-  if (!isAdmin.value) return;
+  // 所有用户都可以修改订单状态
   try {
     await updateOrderStatus(row.id, status);
     row.status = status;
@@ -1688,12 +1837,9 @@ const exportUserOrders = () => {
 };
 
 watch(isAdmin, value => {
-  if (value) {
-    loadUsers();
-    loadOrders();
-  } else {
-    loadUserOrders();
-  }
+  // 所有用户都加载订单数据和用户列表
+  loadOrders();
+  loadUsers();
 }, { immediate: true });
 
 watch(userSearchInput, value => {
@@ -1761,14 +1907,14 @@ const handleSortChange = (options: { prop: string; order: SortOrder }) => {
   }
 };
 
-const loadCategoryStats = async () => {
-  if (!isAdmin.value) return;
+async function loadCategoryStats() {
+  // 所有用户都可以加载分类统计
   try {
     await fetchCategoryStats(buildFilterPayload());
   } catch (error) {
     console.warn('Failed to load category stats', error);
   }
-};
+}
 
 // 监听表单状态筛选，同步到快速筛选（仅同步显示，不触发搜索）
 watch(() => filters.status, (newValue) => {
@@ -2224,5 +2370,78 @@ onBeforeUnmount(() => {
 .diff-item .arrow {
   color: #f59e0b;
   font-weight: bold;
+}
+
+/* 删除提醒样式 */
+.delete-info {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.delete-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.delete-item .field-name {
+  font-weight: 600;
+  color: #374151;
+  min-width: 50px;
+}
+
+.delete-item.warning-text {
+  color: #f59e0b;
+  font-weight: 600;
+  margin-top: 4px;
+}
+
+.delete-warning {
+  color: #ef4444;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+/* 无效ID提醒样式 */
+.invalid-id-info {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.invalid-id-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.invalid-id-item .field-name {
+  font-weight: 600;
+  color: #374151;
+  min-width: 70px;
+}
+
+.invalid-id-item .invalid-value {
+  color: #ef4444;
+  font-weight: 700;
+  background: #fee;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.invalid-id-item.warning-text {
+  color: #3b82f6;
+  font-weight: 500;
+  margin-top: 4px;
+}
+
+.invalid-id-warning {
+  color: #d97706;
+  font-size: 13px;
+  line-height: 1.5;
+  font-weight: 500;
 }
 </style>

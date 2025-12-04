@@ -276,6 +276,7 @@ public static byte[] writeSettlements(List<SettlementRecord> records) throws IOE
         header.createCell(7).setCellValue(" ");
         header.createCell(8).setCellValue(" ");
         header.createCell(9).setCellValue("归属人");
+        header.createCell(10).setCellValue("提交人");
 
         // --- 1. 按“归属人”进行顶级分组 ---
         Map<String, List<SettlementRecord>> byOwner = records.stream()
@@ -348,11 +349,12 @@ public static byte[] writeSettlements(List<SettlementRecord> records) throws IOE
                     row.createCell(7).setCellValue("    ");
                     row.createCell(8).setCellValue("    ");
                     row.createCell(9).setCellValue(currentOwner);
+                    row.createCell(10).setCellValue(safe(r.getSubmitterUsername()));
                 }
             }
         }
         // 自动列宽
-        for (int c = 0; c <= 9; c++) sheet.autoSizeColumn(c);
+        for (int c = 0; c <= 10; c++) sheet.autoSizeColumn(c);
 
         workbook.write(baos);
         return baos.toByteArray();

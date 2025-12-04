@@ -18,13 +18,13 @@ public interface SettlementService {
 
     List<SettlementRecord> createPending(List<OrderRecord> orders, boolean warnDouble);
 
-    IPage<SettlementRecord> list(SettlementFilterRequest request);
+    IPage<SettlementRecord> list(SettlementFilterRequest request, String username, String role);
 
-    IPage<SettlementRecord> listByCursor(SettlementCursorRequest request);
+    IPage<SettlementRecord> listByCursor(SettlementCursorRequest request, String username, String role);
 
     void confirm(Long id, SettlementConfirmRequest request, String operator);
 
-    byte[] export(SettlementExportRequest request);
+    byte[] export(SettlementExportRequest request, String username, String role);
 
     void delete(List<Long> ids);
 
@@ -40,5 +40,5 @@ public interface SettlementService {
 
     int deleteConfirmed();
 
-    int confirmAll(SettlementFilterRequest request, String operator);
+    int confirmAll(SettlementFilterRequest request, String operator, String username, String role);
 }

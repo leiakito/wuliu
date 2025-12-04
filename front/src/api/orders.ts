@@ -82,3 +82,9 @@ export const updateOrder = (id: number, payload: Partial<OrderCreateRequest>) =>
 
 export const fetchCategoryStats = (params: Partial<OrderFilterRequest>) =>
   apiClient.get<OrderCategoryStats[]>('/orders/categories', { params });
+
+export const deleteOrder = (id: number) =>
+  apiClient.delete<void>(`/orders/${id}`);
+
+export const batchDeleteOrders = (ids: number[]) =>
+  apiClient.delete<void>('/orders/batch', { data: ids });

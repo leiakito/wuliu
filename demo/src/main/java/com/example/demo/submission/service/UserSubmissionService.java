@@ -21,4 +21,9 @@ public interface UserSubmissionService {
      * 列出所有可能的归属用户（系统账号与历史提交中的归属人/提交人），去重排序。
      */
     List<String> listOwnerUsernames();
+
+    /**
+     * 删除指定的归属人名称
+     */
+    void deleteOwner(String ownerName);
 }

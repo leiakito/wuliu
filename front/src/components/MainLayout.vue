@@ -30,9 +30,9 @@
         </div>
         <div class="header-actions">
           <el-tag size="small" effect="dark" type="info">{{ roleLabel }}</el-tag>
-          <el-dropdown>
+          <el-dropdown v-if="auth.user">
             <span class="el-dropdown-link">
-              {{ auth.user?.username }}
+              {{ auth.user.username }}
               <el-icon><ArrowDown /></el-icon>
             </span>
             <template #dropdown>
@@ -50,11 +50,17 @@
         </keep-alive>
         <router-view v-if="!$route.meta.keepAlive" />
       </el-main> -->
-      <el-main class="layout-main">
+ <el-main class="layout-main">
   <router-view v-slot="{ Component }">
-    <keep-alive :include="keepAliveComponents">
-      <component :is="Component" />
+    
+    <!-- 需要缓存的页面 -->
+    <keep-alive>
+      <component :is="Component" v-if="$route.meta.keepAlive" />
     </keep-alive>
+
+    <!-- 不缓存的页面 -->
+    <component :is="Component" v-if="!$route.meta.keepAlive" />
+
   </router-view>
 </el-main>
     </el-container>
@@ -78,19 +84,21 @@ const drawerVisible = ref(false);
 
 const baseMenus: NavItem[] = [
   { label: '单号总查询', path: '/dashboard', icon: House },
-  { label: '物流单号', path: '/orders', icon: Document, roles: ['ADMIN'] },
+  { label: '物流单号', path: '/orders', icon: Document, roles: ['ADMIN','USER'] },
   { label: '单号提交', path: '/user-submissions', icon: EditPen },
   { label: '硬件价格', path: '/hardware-prices', icon: Tickets },
   { label: '价格分析', path: '/hardware-analytics', icon: DataAnalysis },
-  { label: '结账管理', path: '/settlements', icon: Tickets, roles: ['ADMIN'] },
-  { label: '提交记录', path: '/submission-logs', icon: Document, roles: ['ADMIN'] },
+  { label: '结账管理', path: '/settlements', icon: Tickets, roles: ['ADMIN','USER'], },
+  { label: '提交记录', path: '/submission-logs', icon: Document, roles: ['ADMIN','USER'] },
   { label: '用户管理', path: '/users', icon: User, roles: ['ADMIN'] },
   { label: '操作日志', path: '/logs', icon: Memo, roles: ['ADMIN'] }
 ];
 
-const menuItems = computed(() =>
-  baseMenus.filter(item => !item.roles || item.roles.includes(auth.user?.role ?? ''))
-);
+const menuItems = computed(() => {
+  const userRole = auth.user?.role;
+  if (!userRole) return baseMenus.filter(item => !item.roles);
+  return baseMenus.filter(item => !item.roles || item.roles.includes(userRole));
+});
 
 const activeMenu = computed(() => {
   const matched = baseMenus.find(item => route.path.startsWith(item.path));
@@ -98,9 +106,6 @@ const activeMenu = computed(() => {
 });
 
 const currentTitle = computed(() => route.meta.title ?? '单号总查询');
-
-// 需要被 keep-alive 缓存的组件名称列表
-const keepAliveComponents = ['OrdersView'];
 
 const roleLabel = computed(() => {
   if (auth.user?.role === 'ADMIN') return '管理员';

@@ -145,6 +145,7 @@ export interface SettlementRecord {
   remark?: string;
   createdAt?: string;
   ownerUsername?: string;
+  submitterUsername?: string;
   orderTime?: string;
   orderStatus?: string;
   orderAmount?: number;
@@ -180,6 +181,7 @@ export interface SettlementFilterRequest {
   status?: string;
   batch?: string;
   ownerUsername?: string;
+  submitterUsername?: string;
   model?: string;
   trackingNumber?: string;
   orderSn?: string;
@@ -203,6 +205,7 @@ export interface SettlementExportRequest {
   status?: string;
   batch?: string;
   ownerUsername?: string;
+  submitterUsername?: string;
   trackingNumbers?: string[];
 }
 

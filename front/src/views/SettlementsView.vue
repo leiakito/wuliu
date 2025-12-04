@@ -7,13 +7,11 @@
       </div>
       <div class="actions">
         <el-button
-          v-if="isAdmin"
           type="primary"
           plain
           @click="openBatchPriceDialog"
         >批量设置价格</el-button>
         <el-button
-          v-if="isAdmin"
           type="success"
           plain
           @click="exportConfirmed"
@@ -21,27 +19,23 @@
           导出已确认数据
         </el-button>
         <el-button
-          v-if="isAdmin"
           type="primary"
           plain
           @click="openBatchSnPriceDialog"
         >SN批量设置价格</el-button>
         <el-button
-          v-if="isAdmin"
           type="success"
           plain
           :disabled="!selectedIds.length"
           @click="openBatchConfirmDialog"
         >批量确认</el-button>
         <el-button
-          v-if="isAdmin"
           type="warning"
           plain
           @click="handleConfirmAll"
         >确认全部</el-button>
         <el-button @click="exportData" :loading="exporting">导出 Excel</el-button>
         <el-button
-          v-if="isAdmin"
           type="danger"
           plain
           :disabled="!selectedIds.length"
@@ -96,9 +90,26 @@
             end-placeholder="结束"
           />
         </el-form-item>
-        <el-form-item label="归属用户" v-if="isAdmin">
+        <el-form-item label="归属用户">
           <el-select
             v-model="filters.ownerUsername"
+            placeholder="全部"
+            clearable
+            filterable
+            style="width: 200px"
+            :loading="ownerLoading"
+          >
+            <el-option
+              v-for="owner in ownerOptions"
+              :key="owner"
+              :label="owner"
+              :value="owner"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="提交人">
+          <el-select
+            v-model="filters.submitterUsername"
             placeholder="全部"
             clearable
             filterable
@@ -197,8 +208,11 @@
             </span>
           </template>
         </el-table-column>
-        <el-table-column prop="ownerUsername" label="归属用户" width="100">
+        <el-table-column prop="ownerUsername" label="归属人" width="100">
           <template #default="{ row }">{{ row.ownerUsername || '-' }}</template>
+        </el-table-column>
+        <el-table-column prop="submitterUsername" label="提交人" width="100">
+          <template #default="{ row }">{{ row.submitterUsername || '-' }}</template>
         </el-table-column>
         <el-table-column
           prop="status"
@@ -222,14 +236,13 @@
         <el-table-column label="操作" width="160">
           <template #default="{ row }">
             <el-button
-              v-if="isAdmin && row.status !== 'CONFIRMED'"
+              v-if="row.status !== 'CONFIRMED'"
               link
               type="primary"
               @click="openConfirm(row)">
               确认
             </el-button>
             <el-button
-              v-if="isAdmin"
               link
               type="danger"
               @click="handleDeleteOne(row)">
@@ -250,7 +263,7 @@
       />
     </el-card>
 
-    <el-dialog v-model="confirmDialog.visible" title="确认结账" width="480px">
+    <el-dialog v-model="confirmDialog.visible" title="确认结账" width="480px" :destroy-on-close="true">
       <el-form label-width="100px">
         <el-form-item label="金额">
           <el-input-number
@@ -271,7 +284,7 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="batchPriceDialog.visible" title="批量设置价格" width="420px">
+    <el-dialog v-model="batchPriceDialog.visible" title="批量设置价格" width="420px" :destroy-on-close="true">
       <el-form label-width="100px">
         <el-form-item label="作用范围">
           <el-radio-group v-model="batchPriceDialog.form.scope">
@@ -307,7 +320,7 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="batchConfirmDialog.visible" title="批量确认" width="420px">
+    <el-dialog v-model="batchConfirmDialog.visible" title="批量确认" width="420px" :destroy-on-close="true">
       <el-form label-width="100px">
         <el-form-item label="备注">
           <el-input v-model="batchConfirmDialog.form.remark" type="textarea" :rows="3" />
@@ -319,7 +332,7 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="batchSnPriceDialog.visible" title="SN批量设置价格" width="520px">
+    <el-dialog v-model="batchSnPriceDialog.visible" title="SN批量设置价格" width="520px" :destroy-on-close="true">
       <el-form label-width="100px">
         <el-form-item label="SN列表">
           <el-input
@@ -411,6 +424,7 @@ const savedPageSize = Number(localStorage.getItem(PAGE_SIZE_KEY)) || 50;
 const filters = reactive({
   status: '',
   ownerUsername: '',
+  submitterUsername: '',
   trackingNumber: '',
   model: '',
   orderSn: '',
@@ -440,24 +454,34 @@ const selectedRecords = ref<SettlementRecord[]>([]);
 const submissionUserOptions = ref<string[]>([]);
 const modelOptions = ref<string[]>([]);
 
-// 用户下拉选项（从后端获取完整用户列表，避免被当前结果集限制）
+// 归属用户选项（从 JSON 文件加载）
+const ownerOptions = ref<string[]>([]);
+const ownerLoading = ref(false);
+const loadOwners = async () => {
+  // 所有用户都可以加载归属人列表
+  ownerLoading.value = true;
+  try {
+    const owners = await listOwnerUsernames({ t: Date.now() });
+    ownerOptions.value = owners.sort((a, b) => a.localeCompare(b));
+  } catch (error) {
+    console.error('加载归属用户列表失败', error);
+  } finally {
+    ownerLoading.value = false;
+  }
+};
+
+// 提交人选项（从数据库 sys_user 表加载）
 const userOptions = ref<SysUser[]>([]);
 const userLoading = ref(false);
 const loadUsers = async () => {
-  if (!isAdmin.value) return;
+  // 所有用户都可以加载用户列表
   userLoading.value = true;
   try {
-    const [sysUsers, ownerNames] = await Promise.all([
-      listUsers(),
-      listOwnerUsernames({ t: Date.now() }).catch(() => [])
-    ]);
-    const map = new Map<string, SysUser>();
-    sysUsers.forEach(u => { if (u?.username) map.set(u.username, u); });
-    ownerNames.forEach(name => {
-      const key = (name || '').trim();
-      if (key && !map.has(key)) map.set(key, { username: key } as SysUser);
-    });
-    userOptions.value = Array.from(map.values()).sort((a,b) => (a.username || '').localeCompare(b.username || ''));
+    const sysUsers = await listUsers();
+    // 只显示数据库中的真实用户
+    userOptions.value = sysUsers
+      .filter(u => u?.username)
+      .sort((a, b) => (a.username || '').localeCompare(b.username || ''));
   } finally {
     userLoading.value = false;
   }
@@ -497,6 +521,7 @@ const params = computed<SettlementFilterRequest>(() => {
     size: filters.size,
     status: filters.status || undefined,
     ownerUsername: filters.ownerUsername?.trim() || undefined,
+    submitterUsername: filters.submitterUsername?.trim() || undefined,
     trackingNumber: filters.trackingNumber?.trim() || undefined,
     model: filters.model?.trim() || undefined,
     orderSn: filters.orderSn?.trim() || undefined,
@@ -572,6 +597,7 @@ const resetFilters = () => {
   // 清空筛选条件
   filters.status = '';
   filters.ownerUsername = '';
+  filters.submitterUsername = '';
   filters.trackingNumber = '';
   filters.model = '';
   filters.orderSn = '';
@@ -670,7 +696,7 @@ const handleAmountChange = async (row: SettlementRecord, currentValue: number | 
 };
 
 const openBatchPriceDialog = () => {
-  if (!isAdmin.value) return;
+  // 所有用户都可以批量设置价格
   batchPriceDialog.form.scope = selectedIds.value.length ? 'SELECTION' : 'MODEL';
   batchPriceDialog.form.model = modelOptions.value[0] ?? '';
   batchPriceDialog.form.amount = null;
@@ -679,7 +705,7 @@ const openBatchPriceDialog = () => {
 };
 
 const openBatchConfirmDialog = () => {
-  if (!isAdmin.value) return;
+  // 所有用户都可以批量确认
   if (!selectedIds.value.length) {
     ElMessage.info('请先选择结算记录');
     return;
@@ -714,7 +740,7 @@ const submitConfirm = async () => {
 };
 
 const handleDelete = async () => {
-  if (!isAdmin.value) return;
+  // 所有用户都可以删除
   if (!selectedIds.value.length) {
     ElMessage.info('请选择记录');
     return;
@@ -727,7 +753,7 @@ const handleDelete = async () => {
 };
 
 const handleDeleteOne = async (row: SettlementRecord) => {
-  if (!isAdmin.value) return;
+  // 所有用户都可以删除单条记录
   try {
     await ElMessageBox.confirm('确认删除该结算记录吗？', '二次确认', {
       type: 'warning',
@@ -748,7 +774,7 @@ const handleDeleteOne = async (row: SettlementRecord) => {
 };
 
 const submitBatchPrice = async () => {
-  if (!isAdmin.value) return;
+  // 所有用户都可以提交批量价格设置
   if (batchPriceDialog.form.amount === null || batchPriceDialog.form.amount === undefined) {
     ElMessage.warning('请输入金额');
     return;
@@ -799,7 +825,7 @@ const submitBatchPrice = async () => {
 };
 
 const submitBatchConfirm = async () => {
-  if (!isAdmin.value) return;
+  // 所有用户都可以批量确认
   if (!selectedIds.value.length) {
     ElMessage.info('请先选择结算记录');
     return;
@@ -823,7 +849,7 @@ const submitBatchConfirm = async () => {
 };
 
 const openBatchSnPriceDialog = () => {
-  if (!isAdmin.value) return;
+  // 所有用户都可以批量设置SN价格
   batchSnPriceDialog.form.snInput = '';
   batchSnPriceDialog.form.amount = null;
   batchSnPriceDialog.parsedSns = [];
@@ -855,7 +881,7 @@ const findDuplicateSns = (sns: string[]): string[] => {
 };
 
 const submitBatchSnPrice = async () => {
-  if (!isAdmin.value) return;
+  // 所有用户都可以提交批量SN价格设置
 
   const sns = parseSns(batchSnPriceDialog.form.snInput);
   const duplicates = findDuplicateSns(sns);
@@ -942,7 +968,8 @@ const exportData = async () => {
   try {
     const exportParams: SettlementExportRequest = {
       status: filters.status || undefined,
-      ownerUsername: filters.ownerUsername?.trim() || undefined
+      ownerUsername: filters.ownerUsername?.trim() || undefined,
+      submitterUsername: filters.submitterUsername?.trim() || undefined
     };
     if (Array.isArray(filters.dateRange) && filters.dateRange.length === 2) {
       exportParams.startDate = filters.dateRange[0];
@@ -1039,14 +1066,21 @@ const statusLabel = (value?: string) => settlementStatusMap[value ?? ''] || '未
 
 // fetchAllSettlements 已移除，改为后端直接过滤返回结果
 
-// 管理员视图：加载用户选项（避免选项被当前结果集限制）
-watch(isAdmin, (v) => { if (v) loadUsers(); }, { immediate: true });
+// 所有用户都加载用户选项和归属人选项（避免选项被当前结果集限制）
+watch(isAdmin, (v) => {
+  loadUsers();
+  loadOwners();
+}, { immediate: true });
 
-// 每次从 keep-alive 返回本页，强制刷新归属用户下拉，避免浏览器内存缓存
-onActivated(() => { if (isAdmin.value) loadUsers(); });
+// 每次从 keep-alive 返回本页，强制刷新下拉列表，避免浏览器内存缓存
+onActivated(() => {
+  // 所有用户都刷新用户和归属人列表
+  loadUsers();
+  loadOwners();
+});
 
 const handleConfirmAll = async () => {
-  if (!isAdmin.value) return;
+  // 所有用户都可以确认全部
 
   try {
     await ElMessageBox.confirm(

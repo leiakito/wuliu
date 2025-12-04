@@ -57,6 +57,17 @@ public class SettlementServiceImpl implements SettlementService {
     private final SettlementCacheService cacheService;
     private final OrderCellStyleMapper orderCellStyleMapper;
 
+    // 内部类：保存提交人和归属人信息
+    private static class SubmissionInfo {
+        String submitterUsername;
+        String ownerUsername;
+
+        SubmissionInfo(String submitterUsername, String ownerUsername) {
+            this.submitterUsername = submitterUsername;
+            this.ownerUsername = ownerUsername;
+        }
+    }
+
     @Override
     @Transactional
     public List<SettlementRecord> createPending(List<OrderRecord> orders, boolean warnDouble) {
@@ -71,7 +82,7 @@ public class SettlementServiceImpl implements SettlementService {
         List<SettlementRecord> existed = settlementRecordMapper.selectList(wrapper);
         Map<String, SettlementRecord> existedMap = existed.stream()
             .collect(Collectors.toMap(SettlementRecord::getTrackingNumber, r -> r, (a, b) -> a));
-        Map<String, String> ownerMap = resolveOwnerByTracking(trackingNumbers);
+        Map<String, SubmissionInfo> submissionInfoMap = resolveSubmissionInfo(trackingNumbers);
         List<SettlementRecord> created = new ArrayList<>();
         for (OrderRecord order : orders) {
             if (existedMap.containsKey(order.getTrackingNumber())) {
@@ -95,7 +106,15 @@ public class SettlementServiceImpl implements SettlementService {
             record.setManualInput(false);
             record.setWarning(warnDouble && Boolean.TRUE.equals(order.isInCurrentSettlement()));
             record.setRemark(order.getRemark());
-            record.setOwnerUsername(ownerMap.getOrDefault(order.getTrackingNumber(), order.getCreatedBy()));
+            // 设置归属人和提交人信息
+            SubmissionInfo info = submissionInfoMap.get(order.getTrackingNumber());
+            if (info != null) {
+                record.setOwnerUsername(info.ownerUsername);
+                record.setSubmitterUsername(info.submitterUsername);
+            } else {
+                record.setOwnerUsername(order.getCreatedBy());
+                record.setSubmitterUsername(null);
+            }
             record.setOrderTime(order.getOrderTime());
             settlementRecordMapper.insert(record);
             created.add(record);
@@ -157,8 +176,8 @@ public class SettlementServiceImpl implements SettlementService {
     }
 
     @Override
-    public IPage<SettlementRecord> listByCursor(SettlementCursorRequest request) {
-        LambdaQueryWrapper<SettlementRecord> wrapper = buildQueryWrapper(request);
+    public IPage<SettlementRecord> listByCursor(SettlementCursorRequest request, String username, String role) {
+        LambdaQueryWrapper<SettlementRecord> wrapper = buildQueryWrapper(request, username, role);
 
         // 游标分页：基于 ID 的范围查询，性能不受页数影响
         if (request.getLastId() != null && request.getLastId() > 0) {
@@ -184,7 +203,7 @@ public class SettlementServiceImpl implements SettlementService {
         // 查询总数（仅在首次查询时）
         Long total = 0L;
         if (request.getLastId() == null) {
-            LambdaQueryWrapper<SettlementRecord> countWrapper = buildQueryWrapper(request);
+            LambdaQueryWrapper<SettlementRecord> countWrapper = buildQueryWrapper(request, username, role);
             total = settlementRecordMapper.selectCount(countWrapper);
         }
 
@@ -201,8 +220,8 @@ public class SettlementServiceImpl implements SettlementService {
     }
 
     @Override
-    public IPage<SettlementRecord> list(SettlementFilterRequest request) {
-        LambdaQueryWrapper<SettlementRecord> wrapper = buildQueryWrapper(request);
+    public IPage<SettlementRecord> list(SettlementFilterRequest request, String username, String role) {
+        LambdaQueryWrapper<SettlementRecord> wrapper = buildQueryWrapper(request, username, role);
         applySorting(wrapper, request.getSortProp(), request.getSortOrder());
 
         log.info("执行查询前的wrapper条件数: {}", wrapper.getExpression().getNormal().size());
@@ -216,7 +235,7 @@ public class SettlementServiceImpl implements SettlementService {
         return result;
     }
 
-    private LambdaQueryWrapper<SettlementRecord> buildQueryWrapper(Object request) {
+    private LambdaQueryWrapper<SettlementRecord> buildQueryWrapper(Object request, String username, String role) {
         LambdaQueryWrapper<SettlementRecord> wrapper = new LambdaQueryWrapper<>();
 
         // 提取共同的筛选条件
@@ -252,6 +271,17 @@ public class SettlementServiceImpl implements SettlementService {
             startDate = r.getStartDate();
             endDate = r.getEndDate();
             ownerUsername = r.getOwnerUsername();
+        }
+
+        // 权限过滤：非管理员只能看到自己提交或归属于自己的单号
+        log.info("权限过滤 - username: {}, role: {}", username, role);
+        if (!"ADMIN".equals(role) && StringUtils.hasText(username)) {
+            log.info("应用普通用户权限过滤，只显示 submitterUsername={} 或 ownerUsername={} 的记录", username, username);
+            wrapper.and(w -> w.eq(SettlementRecord::getSubmitterUsername, username)
+                    .or()
+                    .eq(SettlementRecord::getOwnerUsername, username));
+        } else {
+            log.info("管理员权限，不应用权限过滤");
         }
 
         // 应用筛选条件
@@ -396,8 +426,20 @@ public class SettlementServiceImpl implements SettlementService {
     }
 
     @Override
-    public byte[] export(SettlementExportRequest request) {
+    public byte[] export(SettlementExportRequest request, String username, String role) {
         LambdaQueryWrapper<SettlementRecord> wrapper = new LambdaQueryWrapper<>();
+
+        // 权限过滤：非管理员只能导出自己提交或归属于自己的单号
+        log.info("导出权限过滤 - username: {}, role: {}", username, role);
+        if (!"ADMIN".equals(role) && StringUtils.hasText(username)) {
+            log.info("应用普通用户导出权限过滤");
+            wrapper.and(w -> w.eq(SettlementRecord::getSubmitterUsername, username)
+                    .or()
+                    .eq(SettlementRecord::getOwnerUsername, username));
+        } else {
+            log.info("管理员导出权限，不应用权限过滤");
+        }
+
         if (request.getStatus() != null && !request.getStatus().isBlank()) {
             wrapper.eq(SettlementRecord::getStatus, request.getStatus());
         }
@@ -412,6 +454,9 @@ public class SettlementServiceImpl implements SettlementService {
         }
         if (StringUtils.hasText(request.getOwnerUsername())) {
             wrapper.eq(SettlementRecord::getOwnerUsername, request.getOwnerUsername().trim());
+        }
+        if (StringUtils.hasText(request.getSubmitterUsername())) {
+            wrapper.eq(SettlementRecord::getSubmitterUsername, request.getSubmitterUsername().trim());
         }
         if (!CollectionUtils.isEmpty(request.getTrackingNumbers())) {
             wrapper.in(SettlementRecord::getTrackingNumber, request.getTrackingNumbers());
@@ -715,6 +760,35 @@ public class SettlementServiceImpl implements SettlementService {
         });
     }
 
+    // 新方法：同时获取提交人和归属人信息
+    private Map<String, SubmissionInfo> resolveSubmissionInfo(Set<String> trackingNumbers) {
+        if (CollectionUtils.isEmpty(trackingNumbers)) {
+            return Collections.emptyMap();
+        }
+
+        Map<String, SubmissionInfo> result = new HashMap<>();
+        LambdaQueryWrapper<UserSubmission> submissionWrapper = new LambdaQueryWrapper<>();
+        submissionWrapper.select(UserSubmission::getTrackingNumber, UserSubmission::getOwnerUsername, UserSubmission::getUsername);
+        submissionWrapper.in(UserSubmission::getTrackingNumber, trackingNumbers);
+        List<UserSubmission> submissions = userSubmissionMapper.selectList(submissionWrapper);
+
+        submissions.forEach(submission -> {
+            if (!StringUtils.hasText(submission.getTrackingNumber())) {
+                return;
+            }
+            String owner = StringUtils.hasText(submission.getOwnerUsername())
+                ? submission.getOwnerUsername()
+                : submission.getUsername();
+            String submitter = submission.getUsername();
+
+            if (StringUtils.hasText(owner) || StringUtils.hasText(submitter)) {
+                result.putIfAbsent(submission.getTrackingNumber(), new SubmissionInfo(submitter, owner));
+            }
+        });
+
+        return result;
+    }
+
     private Map<String, String> resolveOwnerByTracking(Set<String> trackingNumbers) {
         if (CollectionUtils.isEmpty(trackingNumbers)) {
             return Collections.emptyMap();
@@ -1013,10 +1087,10 @@ public class SettlementServiceImpl implements SettlementService {
     @Override
     @Transactional
     @CacheEvict(value = "orders", allEntries = true)
-    public int confirmAll(SettlementFilterRequest request, String operator) {
+    public int confirmAll(SettlementFilterRequest request, String operator, String username, String role) {
         // 强制状态为 PENDING，只确认待结账的记录
         request.setStatus("PENDING");
-        LambdaQueryWrapper<SettlementRecord> wrapper = buildQueryWrapper(request);
+        LambdaQueryWrapper<SettlementRecord> wrapper = buildQueryWrapper(request, username, role);
 
         List<SettlementRecord> recordsToConfirm = settlementRecordMapper.selectList(wrapper);
 

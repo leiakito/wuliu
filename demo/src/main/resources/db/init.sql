@@ -105,7 +105,9 @@
                                      deleted          TINYINT         NOT NULL DEFAULT 0,
                                      UNIQUE KEY uk_submission_tracking(tracking_number),
                                      INDEX idx_submission_status(status),
-                                     INDEX idx_submission_date(submission_date)
+                                     INDEX idx_submission_date(submission_date),
+                                     INDEX idx_submission_owner(owner_username),
+                                     INDEX idx_submission_username(username)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
     -- 用户提交原文记录表
@@ -149,6 +151,7 @@
                                        confirmed_by    VARCHAR(64),
                                        confirmed_at    DATETIME,
                                        owner_username  VARCHAR(64),
+                                       submitter_username VARCHAR(64),
                                        order_time      DATETIME,
                                        created_at      DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
                                        updated_at      DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -172,8 +175,9 @@
     -- 初始用户数据（密码: suixiang / operator123，对应 BCrypt 密文）
     INSERT INTO sys_user (username, password, role, status, full_name)
     VALUES
-        ('admin', '$2y$10$/wsz6itJhMn8MvHRVarZFurfAsbIRpVlCnfoLTvx0oCeiyaGEakey', 'ADMIN', 'ENABLED', '系统管理员');
-#         ('operator', '$2y$10$/wsz6itJhMn8MvHRVarZFurfAsbIRpVlCnfoLTvx0oCeiyaGEakey', 'USER', 'ENABLED', '普通用户');
+        ('admin', '$2y$10$/wsz6itJhMn8MvHRVarZFurfAsbIRpVlCnfoLTvx0oCeiyaGEakey', 'ADMIN', 'ENABLED', '系统管理员'),
+        ('liu', '$2y$10$/wsz6itJhMn8MvHRVarZFurfAsbIRpVlCnfoLTvx0oCeiyaGEakey', 'USER', 'ENABLED', '普通用户'),
+    ('tanke', '$2y$10$/wsz6itJhMn8MvHRVarZFurfAsbIRpVlCnfoLTvx0oCeiyaGEakey', 'USER', 'ENABLED', '普通用户');
 
     # -- 初始订单样例
     # INSERT INTO order_record (order_date, order_time, tracking_number, model, sn, remark, category, status, amount, currency, weight, customer_name, created_by, imported)
@@ -214,3 +218,4 @@
         ('admin', 'LOGIN', '管理员登录系统', '127.0.0.1'),
         ('admin', 'IMPORT_ORDER', '批量导入 50 条订单', '127.0.0.1'),
         ('operator', 'GENERATE_SETTLEMENT', '生成 2 条待结账', '127.0.0.1');
+

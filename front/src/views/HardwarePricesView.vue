@@ -5,7 +5,7 @@
         <h2>硬件价格</h2>
         <p class="sub">只记录型号、价格与录入人，支持上传 Excel 批量导入</p>
       </div>
-      <div class="actions" v-if="isAdmin">
+      <div class="actions">
         <input ref="fileInput" type="file" accept=".xls,.xlsx" multiple hidden @change="handleFileChange" />
         <el-button @click="openBatchDialog">导入Excel</el-button>
         <el-button type="primary" @click="openDialog()">新增价格</el-button>
@@ -62,7 +62,7 @@
                   <span class="price" v-if="item.price !== null && item.price !== undefined">￥{{ formatPrice(item.price) }}</span>
                   <span class="price muted" v-else>-</span>
                   <span class="muted small meta">{{ formatDateTime(item.createdAt) }} · {{ item.createdBy }}</span>
-                  <span class="row-actions" v-if="isAdmin">
+                  <span class="row-actions">
                     <el-button link type="primary" @click.stop="openDialog(item)">编辑</el-button>
                     <el-button link type="danger" @click.stop="handleDelete(item)">删除</el-button>
                   </span>
