@@ -12,6 +12,11 @@ export default defineConfig({
   server: {
     port: 5173,
     host: '0.0.0.0',
+    allowedHosts: [
+      '268258sh1ac9.vicp.fun',
+      'localhost',
+      '.localhost'
+    ],
     proxy: {
       '/api': {
         target: 'http://localhost:8081',
