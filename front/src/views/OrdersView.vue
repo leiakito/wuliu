@@ -1146,6 +1146,7 @@ const openEditDialog = (row: OrderRecord) => {
   editDialog.form.status = row.status ?? '';
   editDialog.form.remark = row.remark ?? '';
   editDialog.form.amount = row.amount ?? undefined;
+  editDialog.form.version = row.version ?? 0; // 保存版本号
   editDialog.visible = true;
 };
 
@@ -1673,13 +1674,27 @@ const submitEdit = async () => {
       sn: editDialog.form.sn,
       status: editDialog.form.status,
       remark: editDialog.form.remark,
-      amount: editDialog.form.amount
+      amount: editDialog.form.amount,
+      version: editDialog.form.version // 传递版本号
     };
     await updateOrder(editDialog.targetId, payload);
     editDialog.visible = false;
     ElMessage.success('已更新');
     // 单条编辑不需要差异检测和统计刷新，只刷新当前页面数据
     loadOrders();
+  } catch (error: any) {
+    // 检查是否是乐观锁冲突
+    const errorMessage = error?.response?.data?.message || error?.message || '';
+    if (errorMessage.includes('已被') || errorMessage.includes('修改')) {
+      ElMessage({
+        type: 'warning',
+        message: '⚠️ 该订单已被其他用户修改，已自动刷新最新数据，请重新操作',
+        duration: 5000,
+        showClose: true
+      });
+    }
+    // 刷新数据获取最新版本号
+    await loadOrders();
   } finally {
     editDialog.loading = false;
   }

@@ -1049,7 +1049,10 @@ public class OrderServiceImpl implements OrderService {
             throw new BusinessException(ErrorCode.NOT_FOUND, "订单不存在");
         }
         record.setStatus(status);
-        orderRecordMapper.updateById(record);
+        int updated = orderRecordMapper.updateById(record);
+        if (updated == 0) {
+            throw new BusinessException(ErrorCode.OPTIMISTIC_LOCK_CONFLICT);
+        }
     }
 
     @Override
@@ -1067,7 +1070,10 @@ public class OrderServiceImpl implements OrderService {
         if (request.getRemark() != null) {
             record.setRemark(request.getRemark());
         }
-        orderRecordMapper.updateById(record);
+        int updated = orderRecordMapper.updateById(record);
+        if (updated == 0) {
+            throw new BusinessException(ErrorCode.OPTIMISTIC_LOCK_CONFLICT);
+        }
     }
 
     @Override
@@ -1205,7 +1211,10 @@ public class OrderServiceImpl implements OrderService {
             record.setRemark(request.getRemark());
         }
         record.setCurrency("CNY");
-        orderRecordMapper.updateById(record);
+        int updated = orderRecordMapper.updateById(record);
+        if (updated == 0) {
+            throw new BusinessException(ErrorCode.OPTIMISTIC_LOCK_CONFLICT);
+        }
         settlementService.syncFromOrder(record);
         return record;
     }

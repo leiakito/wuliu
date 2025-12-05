@@ -50,6 +50,13 @@ const routes: RouteRecordRaw[] = [
         meta: { requiresAuth: true, title: '价格分析' }
       },
       {
+        path: 'draft-settlements',
+        name: 'draft-settlements',
+        component: () => import('@/views/DraftSettlementsView.vue'),
+        // ✅ ADMIN 和 USER 都可以访问
+        meta: { requiresAuth: true, title: '待结账', roles: ['ADMIN', 'USER'] }
+      },
+      {
         path: 'settlements',
         name: 'settlements',
         component: () => import('@/views/SettlementsView.vue'),

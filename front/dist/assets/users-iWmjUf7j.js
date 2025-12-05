@@ -1,0 +1,1 @@
+import{j as e}from"./index-DVwYDEL5.js";const a=()=>e.get("/users"),o=s=>e.post("/users",s),u=(s,t)=>e.put(`/users/${s}`,t),p=(s,t)=>e.put(`/users/${s}/password`,{password:t}),c=s=>e.delete(`/users/${s}`);export{o as c,c as d,a as l,p as r,u};

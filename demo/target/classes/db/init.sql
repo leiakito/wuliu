@@ -52,6 +52,7 @@
                                   imported        TINYINT         NOT NULL DEFAULT 1,
                                   created_at      DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
                                   updated_at      DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                                  version         INT             NOT NULL DEFAULT 0 COMMENT '乐观锁版本号',
                                   deleted         TINYINT         NOT NULL DEFAULT 0,
                                   -- 已移除唯一约束 uk_order_tracking_sn，允许重复数据
                                   INDEX idx_order_date(order_date),  -- 索引提高查询速度
@@ -155,6 +156,7 @@
                                        order_time      DATETIME,
                                        created_at      DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
                                        updated_at      DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                                       version         INT             NOT NULL DEFAULT 0 COMMENT '乐观锁版本号',
                                        deleted         TINYINT         NOT NULL DEFAULT 0,
                                        INDEX idx_settle_batch(settle_batch),
                                        INDEX idx_settle_status(status),

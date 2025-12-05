@@ -415,12 +415,16 @@ public class SettlementServiceImpl implements SettlementService {
         }
         record.setAmount(targetAmount);
         record.setRemark(request.getRemark());
+        // 确认操作：将状态改为 CONFIRMED
         record.setStatus("CONFIRMED");
         record.setSettleBatch("BATCH-" + LocalDate.now());
         record.setPayableAt(LocalDate.now());
         record.setConfirmedBy(operator);
         record.setConfirmedAt(LocalDateTime.now());
-        settlementRecordMapper.updateById(record);
+        int updated = settlementRecordMapper.updateById(record);
+        if (updated == 0) {
+            throw new BusinessException(ErrorCode.OPTIMISTIC_LOCK_CONFLICT);
+        }
         updateOrderWithSettlement(record, targetAmount, order);
         markSubmissionCompleted(record.getTrackingNumber());
     }
@@ -519,11 +523,17 @@ public class SettlementServiceImpl implements SettlementService {
             trackingUpdate.set(OrderRecord::getAmount, request.getAmount());
             orderRecordMapper.update(null, trackingUpdate);
         }
-        records.forEach(record -> {
+        int successCount = 0;
+        for (SettlementRecord record : records) {
             record.setAmount(request.getAmount());
-            settlementRecordMapper.updateById(record);
-        });
-        return records.size();
+            int updated = settlementRecordMapper.updateById(record);
+            if (updated > 0) {
+                successCount++;
+            } else {
+                log.warn("按型号批量更新金额时检测到乐观锁冲突，跳过 settlementId={}", record.getId());
+            }
+        }
+        return successCount;
     }
 
     @Override
@@ -554,12 +564,18 @@ public class SettlementServiceImpl implements SettlementService {
             // 3) 按单条确认的规则更新该记录及其关联订单/提交状态
             record.setAmount(targetAmount);
             record.setRemark(request.getRemark());
+            // 确认操作：将状态改为 CONFIRMED
             record.setStatus("CONFIRMED");
             record.setSettleBatch("BATCH-" + LocalDate.now());
             record.setPayableAt(LocalDate.now());
             record.setConfirmedBy(operator);
             record.setConfirmedAt(LocalDateTime.now());
-            settlementRecordMapper.updateById(record);
+            int updated = settlementRecordMapper.updateById(record);
+            if (updated == 0) {
+                // 批量操作中单条失败，记录日志但继续处理其他记录
+                log.warn("批量确认时检测到乐观锁冲突，跳过 settlementId={}", id);
+                continue;
+            }
 
             // 同步订单金额与状态，并根据需要更新用户提交状态
             updateOrderWithSettlement(record, targetAmount, null);
@@ -580,7 +596,10 @@ public class SettlementServiceImpl implements SettlementService {
         if (request.getRemark() != null) {
             record.setRemark(request.getRemark());
         }
-        settlementRecordMapper.updateById(record);
+        int updated = settlementRecordMapper.updateById(record);
+        if (updated == 0) {
+            throw new BusinessException(ErrorCode.OPTIMISTIC_LOCK_CONFLICT);
+        }
         updateOrderAmount(record, amount);
     }
 
@@ -624,9 +643,17 @@ public class SettlementServiceImpl implements SettlementService {
                 record.setRemark(order.getRemark());
             }
         });
-        records.forEach(settlementRecordMapper::updateById);
+        records.forEach(record -> {
+            int updated = settlementRecordMapper.updateById(record);
+            if (updated == 0) {
+                log.warn("同步订单到结算记录时检测到乐观锁冲突，跳过 settlementId={}", record.getId());
+            }
+        });
         if (order.getAmount() != null) {
-            orderRecordMapper.updateById(order);
+            int updated = orderRecordMapper.updateById(order);
+            if (updated == 0) {
+                log.warn("同步订单金额时检测到乐观锁冲突，orderId={}", order.getId());
+            }
         }
     }
 
@@ -1053,10 +1080,16 @@ public class SettlementServiceImpl implements SettlementService {
         }
 
         // 更新结算记录的金额（只更新没有价格的）
-        toUpdate.forEach(record -> {
+        int successCount = 0;
+        for (SettlementRecord record : toUpdate) {
             record.setAmount(request.getAmount());
-            settlementRecordMapper.updateById(record);
-        });
+            int updated = settlementRecordMapper.updateById(record);
+            if (updated > 0) {
+                successCount++;
+            } else {
+                log.warn("按SN批量更新金额时检测到乐观锁冲突，跳过 settlementId={}", record.getId());
+            }
+        }
 
         // 同步更新订单金额（只更新目标订单）
         if (!toUpdateOrderIds.isEmpty()) {
@@ -1066,15 +1099,26 @@ public class SettlementServiceImpl implements SettlementService {
             orderRecordMapper.update(null, orderUpdate);
         }
 
-        return new SettlementBatchSnPriceResponse(toUpdate.size(), new ArrayList<>(skippedSnSet));
+        return new SettlementBatchSnPriceResponse(successCount, new ArrayList<>(skippedSnSet));
     }
 
     @Override
     @Transactional
-    public int deleteConfirmed() {
-        log.info("开始删除所有已确认的结算记录");
+    public int deleteConfirmed(String username, String role) {
+        log.info("删除已确认的结算记录 - username: {}, role: {}", username, role);
         LambdaQueryWrapper<SettlementRecord> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(SettlementRecord::getStatus, "CONFIRMED");
+
+        // 权限过滤：非管理员只能删除自己提交或归属于自己的记录
+        if (!"ADMIN".equals(role) && StringUtils.hasText(username)) {
+            log.info("应用普通用户权限过滤，只删除 submitterUsername={} 或 ownerUsername={} 的已确认记录", username, username);
+            wrapper.and(w -> w.eq(SettlementRecord::getSubmitterUsername, username)
+                    .or()
+                    .eq(SettlementRecord::getOwnerUsername, username));
+        } else {
+            log.info("管理员权限，删除所有已确认记录");
+        }
+
         int count = settlementRecordMapper.delete(wrapper);
         log.info("已删除 {} 条已确认的结算记录", count);
 
@@ -1088,8 +1132,7 @@ public class SettlementServiceImpl implements SettlementService {
     @Transactional
     @CacheEvict(value = "orders", allEntries = true)
     public int confirmAll(SettlementFilterRequest request, String operator, String username, String role) {
-        // 强制状态为 PENDING，只确认待结账的记录
-        request.setStatus("PENDING");
+        // 使用传入的状态筛选条件（DRAFT 或 PENDING）
         LambdaQueryWrapper<SettlementRecord> wrapper = buildQueryWrapper(request, username, role);
 
         List<SettlementRecord> recordsToConfirm = settlementRecordMapper.selectList(wrapper);
@@ -1098,12 +1141,18 @@ public class SettlementServiceImpl implements SettlementService {
         for (SettlementRecord record : recordsToConfirm) {
             // 只处理有金额的记录
             if (record.getAmount() != null) {
+                // 确认操作：将状态改为 CONFIRMED
                 record.setStatus("CONFIRMED");
                 record.setSettleBatch("BATCH-" + LocalDate.now());
                 record.setPayableAt(LocalDate.now());
                 record.setConfirmedBy(operator);
                 record.setConfirmedAt(LocalDateTime.now());
-                settlementRecordMapper.updateById(record);
+                int updated = settlementRecordMapper.updateById(record);
+                if (updated == 0) {
+                    // 全部确认时单条失败，记录日志但继续处理其他记录
+                    log.warn("全部确认时检测到乐观锁冲突，跳过 settlementId={}", record.getId());
+                    continue;
+                }
 
                 // 同步订单金额与状态，并根据需要更新用户提交状态
                 updateOrderWithSettlement(record, record.getAmount(), null);
@@ -1112,5 +1161,42 @@ public class SettlementServiceImpl implements SettlementService {
             }
         }
         return confirmedCount;
+    }
+
+    @Override
+    @Transactional
+    @CacheEvict(value = "orders", allEntries = true)
+    public int moveToDraft(List<Long> ids) {
+        if (CollectionUtils.isEmpty(ids)) {
+            return 0;
+        }
+        log.info("批量移动到待结账 - 记录ID数量: {}", ids.size());
+        LambdaUpdateWrapper<SettlementRecord> wrapper = new LambdaUpdateWrapper<>();
+        wrapper.in(SettlementRecord::getId, ids)
+                .set(SettlementRecord::getStatus, "DRAFT");
+        int count = settlementRecordMapper.update(null, wrapper);
+        log.info("已将 {} 条记录移动到待结账", count);
+        return count;
+    }
+
+    @Override
+    @Transactional
+    @CacheEvict(value = "orders", allEntries = true)
+    public int moveToPending(List<Long> ids) {
+        if (CollectionUtils.isEmpty(ids)) {
+            return 0;
+        }
+        log.info("批量移动到结账管理 - 记录ID数量: {}", ids.size());
+        // 将待结账工作区的数据（DRAFT 或 CONFIRMED）移动到结账管理，统一改为 PENDING 状态
+        LambdaUpdateWrapper<SettlementRecord> wrapper = new LambdaUpdateWrapper<>();
+        wrapper.in(SettlementRecord::getId, ids)
+                .set(SettlementRecord::getStatus, "PENDING")
+                .set(SettlementRecord::getSettleBatch, null)  // 清除批次信息，等待正式确认
+                .set(SettlementRecord::getPayableAt, null)    // 清除应付日期
+                .set(SettlementRecord::getConfirmedBy, null)  // 清除确认人
+                .set(SettlementRecord::getConfirmedAt, null); // 清除确认时间
+        int count = settlementRecordMapper.update(null, wrapper);
+        log.info("已将 {} 条记录移动到结账管理（重置为 PENDING 状态）", count);
+        return count;
     }
 }

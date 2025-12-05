@@ -35,3 +35,5 @@ export const confirmSettlementsBatch = (payload) => apiClient.put('/settlements/
 export const updateSettlementAmount = (id, payload) => apiClient.put(`/settlements/${id}/amount`, payload);
 export const updateSettlementPriceBySn = (payload) => apiClient.put('/settlements/price-by-sn', payload);
 export const confirmAllSettlements = (payload) => apiClient.put('/settlements/confirm-all', payload);
+export const moveToDraft = (ids) => apiClient.put('/settlements/move-to-draft', ids);
+export const moveToPending = (ids) => apiClient.put('/settlements/move-to-pending', ids);

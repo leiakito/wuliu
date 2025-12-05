@@ -11,6 +11,7 @@ public enum ErrorCode {
     FORBIDDEN("FORBIDDEN", "没有访问权限"),
     NOT_FOUND("NOT_FOUND", "数据不存在"),
     DUPLICATE("DUPLICATE", "数据重复"),
+    OPTIMISTIC_LOCK_CONFLICT("OPTIMISTIC_LOCK_CONFLICT", "数据已被其他用户修改，请刷新后重试"),
     SYSTEM_ERROR("SYSTEM_ERROR", "系统异常");
 
     private final String code;

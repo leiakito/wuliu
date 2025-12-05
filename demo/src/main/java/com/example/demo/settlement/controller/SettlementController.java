@@ -148,11 +148,13 @@ public class SettlementController {
     }
 
     @DeleteMapping("/confirmed")
-    @SaCheckRole("ADMIN")
-    @LogOperation("删除所有已确认记录")
-    @Operation(summary = "删除所有已确认记录", description = "删除数据库中所有状态为已确认的结算记录")
+    @SaCheckLogin
+    @LogOperation("删除已确认记录")
+    @Operation(summary = "删除已确认记录", description = "删除状态为已确认的结算记录（普通用户只能删除自己的数据，管理员可以删除所有数据）")
     public ApiResponse<Integer> deleteConfirmed() {
-        int count = settlementService.deleteConfirmed();
+        String username = StpUtil.getLoginIdAsString();
+        String role = (String) StpUtil.getSession().get("role");
+        int count = settlementService.deleteConfirmed(username, role);
         return ApiResponse.ok(count);
     }
 
@@ -168,5 +170,23 @@ public class SettlementController {
             .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=settlements.xlsx")
             .contentType(MediaType.APPLICATION_OCTET_STREAM)
             .body(bytes);
+    }
+
+    @PutMapping("/move-to-draft")
+    @SaCheckLogin
+    @LogOperation("移动到待结账")
+    @Operation(summary = "移动到待结账", description = "将选中的结算记录移动到待结账状态（DRAFT）")
+    public ApiResponse<Integer> moveToDraft(@RequestBody List<Long> ids) {
+        int count = settlementService.moveToDraft(ids);
+        return ApiResponse.ok(count);
+    }
+
+    @PutMapping("/move-to-pending")
+    @SaCheckLogin
+    @LogOperation("移动到结账管理")
+    @Operation(summary = "移动到结账管理", description = "将选中的待结账记录移动到结账管理状态（PENDING）")
+    public ApiResponse<Integer> moveToPending(@RequestBody List<Long> ids) {
+        int count = settlementService.moveToPending(ids);
+        return ApiResponse.ok(count);
     }
 }

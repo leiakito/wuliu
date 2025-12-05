@@ -34,6 +34,7 @@ export interface OrderRecord {
   imported?: boolean;
   createdAt?: string;
   updatedAt?: string;
+  version?: number;
   inCurrentSettlement?: boolean;
   
   // 单元格格式字段 - 运单号列
@@ -127,6 +128,7 @@ export interface OrderUpdateRequest {
   amount?: number;
   status?: string;
   remark?: string;
+  version?: number;
 }
 
 export interface SettlementRecord {
@@ -144,6 +146,7 @@ export interface SettlementRecord {
   payableAt?: string;
   remark?: string;
   createdAt?: string;
+  version?: number;
   ownerUsername?: string;
   submitterUsername?: string;
   orderTime?: string;
@@ -197,6 +200,7 @@ export interface SettlementFilterRequest {
 export interface SettlementConfirmRequest {
   amount: number;
   remark?: string;
+  version?: number;
 }
 
 export interface SettlementExportRequest {
@@ -228,6 +232,7 @@ export interface SettlementBatchConfirmRequest {
 export interface SettlementAmountRequest {
   amount: number;
   remark?: string;
+  version?: number;
 }
 
 export interface SettlementBatchSnPriceRequest {

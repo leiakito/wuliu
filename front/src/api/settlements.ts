@@ -66,3 +66,9 @@ export const updateSettlementPriceBySn = (payload: SettlementBatchSnPriceRequest
 
 export const confirmAllSettlements = (payload: SettlementFilterRequest) =>
   apiClient.put<number>('/settlements/confirm-all', payload);
+
+export const moveToDraft = (ids: number[]) =>
+  apiClient.put<number>('/settlements/move-to-draft', ids);
+
+export const moveToPending = (ids: number[]) =>
+  apiClient.put<number>('/settlements/move-to-pending', ids);

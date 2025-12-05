@@ -36,6 +36,14 @@
         >确认全部</el-button>
         <el-button @click="exportData" :loading="exporting">导出 Excel</el-button>
         <el-button
+          type="info"
+          plain
+          :disabled="!selectedIds.length"
+          @click="handleMoveToDraft"
+        >
+          移动到待结账
+        </el-button>
+        <el-button
           type="danger"
           plain
           :disabled="!selectedIds.length"
@@ -50,6 +58,7 @@
       <el-form :inline="true" :model="filters" class="filter-form">
         <el-form-item label="状态">
           <el-select v-model="filters.status" clearable placeholder="全部" style="width: 160px">
+            <el-option v-if="isAdmin" label="草稿" value="DRAFT" />
             <el-option label="待结账" value="PENDING" />
             <el-option label="已确认" value="CONFIRMED" />
           </el-select>
@@ -193,7 +202,6 @@
         >
           <template #default="{ row }">
             <el-input-number
-              v-if="row.status === 'PENDING' || row.status === 'CONFIRMED'"
               v-model="row.amount"
               :min="0"
               :step="10"
@@ -203,9 +211,6 @@
               style="width: 100%"
               @change="(currentValue, oldValue) => handleAmountChange(row, currentValue, oldValue)"
             />
-            <span v-else :style="styleFor(row, 'amount')">
-              <template v-if="row.amount !== null && row.amount !== undefined">￥{{ formatAmount(row.amount) }}</template>
-            </span>
           </template>
         </el-table-column>
         <el-table-column prop="ownerUsername" label="归属人" width="100">
@@ -392,7 +397,8 @@ import {
   confirmSettlementsBatch,
   updateSettlementAmount,
   updateSettlementPriceBySn,
-  confirmAllSettlements
+  confirmAllSettlements,
+  moveToDraft
 } from '@/api/settlements';
 import { listUsers } from '@/api/users';
 import { listOwnerUsernames } from '@/api/submissions';
@@ -422,7 +428,7 @@ const PAGE_SIZE_KEY = 'settlements-page-size';
 const savedPageSize = Number(localStorage.getItem(PAGE_SIZE_KEY)) || 50;
 
 const filters = reactive({
-  status: '',
+  status: 'PENDING', // 默认只显示待结账状态，不显示待结账工作区的已确认数据
   ownerUsername: '',
   submitterUsername: '',
   trackingNumber: '',
@@ -492,7 +498,7 @@ const confirmDialog = reactive({
   visible: false,
   loading: false,
   targetId: 0,
-  form: { amount: 0, remark: '' }
+  form: { amount: 0, remark: '', version: 0 }
 });
 
 const batchPriceDialog = reactive({
@@ -678,6 +684,7 @@ const handleAmountChange = async (row: SettlementRecord, currentValue: number | 
     const payload: SettlementConfirmRequest = {
       amount: currentValue,
       remark: row.remark, // 保留现有的备注
+      version: row.version // 乐观锁版本号
     };
     await confirmSettlement(row.id, payload);
 
@@ -687,11 +694,25 @@ const handleAmountChange = async (row: SettlementRecord, currentValue: number | 
 
     ElMessage.success(`记录 ${row.trackingNumber || row.orderSn} 已确认`);
 
-  } catch (error) {
+  } catch (error: any) {
     console.error('快速确认失败:', error);
     // 如果API调用失败，将金额恢复到旧值
     row.amount = oldValue;
-    ElMessage.error('确认失败，请重试');
+
+    // 检查是否是乐观锁冲突
+    const errorMessage = error?.response?.data?.message || error?.message || '';
+    if (errorMessage.includes('已被') || errorMessage.includes('修改')) {
+      // 乐观锁冲突，强调提示并刷新
+      ElMessage({
+        type: 'warning',
+        message: '⚠️ 该记录已被其他用户修改，已自动刷新最新数据，请重新操作',
+        duration: 5000,
+        showClose: true
+      });
+    }
+
+    // 刷新数据获取最新版本号
+    await loadData();
   }
 };
 
@@ -720,6 +741,7 @@ const openConfirm = (row: SettlementRecord) => {
   confirmDialog.targetId = row.id;
   confirmDialog.form.amount = row.amount ?? 0;
   confirmDialog.form.remark = row.remark ?? '';
+  confirmDialog.form.version = row.version ?? 0; // 保存版本号
 };
 
 const submitConfirm = async () => {
@@ -728,15 +750,51 @@ const submitConfirm = async () => {
   try {
     const payload: SettlementConfirmRequest = {
       amount: confirmDialog.form.amount,
-      remark: confirmDialog.form.remark
+      remark: confirmDialog.form.remark,
+      version: confirmDialog.form.version // 传递版本号
     };
     await confirmSettlement(confirmDialog.targetId, payload);
     ElMessage.success('已确认');
     confirmDialog.visible = false;
     loadData();
+  } catch (error: any) {
+    // 检查是否是乐观锁冲突
+    const errorMessage = error?.response?.data?.message || error?.message || '';
+    if (errorMessage.includes('已被') || errorMessage.includes('修改')) {
+      ElMessage({
+        type: 'warning',
+        message: '⚠️ 该记录已被其他用户修改，已自动刷新最新数据，请重新操作',
+        duration: 5000,
+        showClose: true
+      });
+    }
+    // 刷新数据获取最新版本号
+    await loadData();
   } finally {
     confirmDialog.loading = false;
   }
+};
+
+const handleMoveToDraft = async () => {
+  if (!selectedIds.value.length) {
+    ElMessage.info('请选择记录');
+    return;
+  }
+  await ElMessageBox.confirm(`确认将选中的 ${selectedIds.value.length} 条记录移动到待结账吗？`, '提示', {
+    type: 'info',
+    confirmButtonText: '确认移动',
+    cancelButtonText: '取消'
+  });
+  const count = await moveToDraft(selectedIds.value);
+  ElMessage.success(`已将 ${count} 条记录移动到待结账`);
+  selectedIds.value = [];
+
+  // 移动到待结账后，自动排除 DRAFT 状态，避免已移动的数据继续显示
+  // 如果当前筛选条件是"全部"或包含 DRAFT，自动切换到 PENDING
+  if (filters.status === '' || filters.status === 'DRAFT') {
+    filters.status = 'PENDING';
+  }
+  loadData();
 };
 
 const handleDelete = async () => {
@@ -810,11 +868,17 @@ const submitBatchPrice = async () => {
     }
     batchPriceDialog.loading = true;
     try {
-      const payload = {
-        amount: batchPriceDialog.form.amount,
-        remark: undefined
-      };
-      await Promise.all(selectedIds.value.map(id => updateSettlementAmount(id, payload)));
+      // 批量更新时需要传递每条记录的 version
+      const updatePromises = selectedIds.value.map(id => {
+        const record = records.value.find(r => r.id === id);
+        const payload = {
+          amount: batchPriceDialog.form.amount,
+          remark: undefined,
+          version: record?.version ?? 0 // 传递对应记录的版本号
+        };
+        return updateSettlementAmount(id, payload);
+      });
+      await Promise.all(updatePromises);
       ElMessage.success('已更新所选记录金额');
       batchPriceDialog.visible = false;
       loadData();

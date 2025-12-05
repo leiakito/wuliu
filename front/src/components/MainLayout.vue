@@ -88,6 +88,7 @@ const baseMenus: NavItem[] = [
   { label: '单号提交', path: '/user-submissions', icon: EditPen },
   { label: '硬件价格', path: '/hardware-prices', icon: Tickets },
   { label: '价格分析', path: '/hardware-analytics', icon: DataAnalysis },
+  { label: '待结账', path: '/draft-settlements', icon: Document, roles: ['ADMIN','USER'] },
   { label: '结账管理', path: '/settlements', icon: Tickets, roles: ['ADMIN','USER'], },
   { label: '提交记录', path: '/submission-logs', icon: Document, roles: ['ADMIN','USER'] },
   { label: '用户管理', path: '/users', icon: User, roles: ['ADMIN'] },

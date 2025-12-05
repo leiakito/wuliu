@@ -16,7 +16,5 @@ export const searchOrders = (trackingNumbers) => apiClient.post('/orders/search'
 export const updateOrderAmount = (id, payload) => apiClient.patch(`/orders/${id}/amount`, payload);
 export const updateOrder = (id, payload) => apiClient.put(`/orders/${id}`, payload);
 export const fetchCategoryStats = (params) => apiClient.get('/orders/categories', { params });
-
-// Added to align with TypeScript API and prevent runtime import errors
 export const deleteOrder = (id) => apiClient.delete(`/orders/${id}`);
 export const batchDeleteOrders = (ids) => apiClient.delete('/orders/batch', { data: ids });
