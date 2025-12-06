@@ -119,11 +119,6 @@ SET @exists := (SELECT COUNT(*) FROM information_schema.statistics WHERE table_s
 SET @sql := IF(@exists = 0, CONCAT('CREATE INDEX ', @idx, ' ON ', @tbl, '(tracking_number, model)'), 'DO 0');
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
-SET @idx := 'idx_settlement_payable_status';
-SET @exists := (SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = @tbl AND index_name = @idx);
-SET @sql := IF(@exists = 0, CONCAT('CREATE INDEX ', @idx, ' ON ', @tbl, '(payable_at, status)'), 'DO 0');
-PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
-
 SET @idx := 'idx_settlement_batch_status';
 SET @exists := (SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = @tbl AND index_name = @idx);
 SET @sql := IF(@exists = 0, CONCAT('CREATE INDEX ', @idx, ' ON ', @tbl, '(settle_batch, status)'), 'DO 0');
@@ -252,10 +247,23 @@ SET @exists := (SELECT COUNT(*) FROM information_schema.statistics WHERE table_s
 SET @sql := IF(@exists = 0, CONCAT('CREATE INDEX ', @idx, ' ON ', @tbl, '(username)'), 'DO 0');
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
--- 4) 幂等创建唯一索引（防重复提交同一单号）
+-- 4) 幂等：移除条件唯一索引，改为普通索引，允许重复 tracking_number
+-- 4.1) 删除 uk_submission_tracking_active（若存在）
+SET @idx := 'uk_submission_tracking_active';
+SET @exists := (SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = @tbl AND index_name = @idx);
+SET @sql := IF(@exists > 0, CONCAT('ALTER TABLE ', @tbl, ' DROP INDEX ', @idx), 'DO 0');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+-- 4.2) 删除旧的单列唯一索引 uk_submission_tracking（若存在）
 SET @idx := 'uk_submission_tracking';
 SET @exists := (SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = @tbl AND index_name = @idx);
-SET @sql := IF(@exists = 0, CONCAT('CREATE UNIQUE INDEX ', @idx, ' ON ', @tbl, '(tracking_number)'), 'DO 0');
+SET @sql := IF(@exists > 0, CONCAT('ALTER TABLE ', @tbl, ' DROP INDEX ', @idx), 'DO 0');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+-- 4.3) 创建普通索引 idx_submission_tracking（若不存在）
+SET @idx := 'idx_submission_tracking';
+SET @exists := (SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = @tbl AND index_name = @idx);
+SET @sql := IF(@exists = 0, CONCAT('CREATE INDEX ', @idx, ' ON ', @tbl, '(tracking_number)'), 'DO 0');
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 -- =============================

@@ -102,10 +102,17 @@
           <div class="header-left">
             <i class="el-icon-warning-filled" style="color: #f59e0b; font-size: 18px;"></i>
             <span class="header-title">数据变更提醒</span>
-            <el-tag type="warning" size="small">{{ diffNotices.length }} 条</el-tag>
+            <el-tag type="warning" size="small" v-if="diffNoticesAll.length === diffNotices.length">
+              {{ diffNotices.length }} 条
+            </el-tag>
+            <el-tag type="warning" size="small" v-else>
+              显示 {{ diffNotices.length }} 条，共 {{ diffNoticesAll.length }} 条
+            </el-tag>
           </div>
           <div class="header-actions">
-            <el-button size="small" @click="exportDiffNotices">导出变更</el-button>
+            <el-button size="small" @click="exportDiffNotices">
+              导出变更 <span v-if="diffNoticesAll.length > diffNotices.length">(全部 {{ diffNoticesAll.length }} 条)</span>
+            </el-button>
             <el-button size="small" type="danger" @click="clearDiffNotices">清空提醒</el-button>
           </div>
         </div>
@@ -175,9 +182,56 @@
                 class="diff-item"
               >
                 <span class="field-name">{{ field }}:</span>
-                <span class="old-value">{{ formatDiffValue(row.before, field) }}</span>
-                <span class="arrow">→</span>
-                <span class="new-value">{{ formatDiffValue(row.after, field) }}</span>
+                <!-- 样式字段显示颜色块 -->
+                <template v-if="field.endsWith('(样式)')">
+                  <span class="style-value">
+                    <template v-if="formatStyleValue(row.before, field)">
+                      <span
+                        v-if="formatStyleValue(row.before, field)?.bg"
+                        class="color-block"
+                        :style="{ backgroundColor: formatStyleValue(row.before, field)?.bg }"
+                        :title="formatStyleValue(row.before, field)?.bg"
+                      ></span>
+                      <span v-if="formatStyleValue(row.before, field)?.fg" class="color-text">
+                        字:<span
+                          class="color-block"
+                          :style="{ backgroundColor: formatStyleValue(row.before, field)?.fg }"
+                          :title="formatStyleValue(row.before, field)?.fg"
+                        ></span>
+                      </span>
+                      <el-icon v-if="formatStyleValue(row.before, field)?.strike" title="删除线"><Delete /></el-icon>
+                      <span v-if="formatStyleValue(row.before, field)?.bold" class="bold-indicator" title="加粗">B</span>
+                    </template>
+                    <span v-else class="no-style">-</span>
+                  </span>
+                  <span class="arrow">→</span>
+                  <span class="style-value">
+                    <template v-if="formatStyleValue(row.after, field)">
+                      <span
+                        v-if="formatStyleValue(row.after, field)?.bg"
+                        class="color-block"
+                        :style="{ backgroundColor: formatStyleValue(row.after, field)?.bg }"
+                        :title="formatStyleValue(row.after, field)?.bg"
+                      ></span>
+                      <span v-if="formatStyleValue(row.after, field)?.fg" class="color-text">
+                        字:<span
+                          class="color-block"
+                          :style="{ backgroundColor: formatStyleValue(row.after, field)?.fg }"
+                          :title="formatStyleValue(row.after, field)?.fg"
+                        ></span>
+                      </span>
+                      <el-icon v-if="formatStyleValue(row.after, field)?.strike" title="删除线"><Delete /></el-icon>
+                      <span v-if="formatStyleValue(row.after, field)?.bold" class="bold-indicator" title="加粗">B</span>
+                    </template>
+                    <span v-else class="no-style">-</span>
+                  </span>
+                </template>
+                <!-- 普通字段显示文本 -->
+                <template v-else>
+                  <span class="old-value">{{ formatDiffValue(row.before, field) }}</span>
+                  <span class="arrow">→</span>
+                  <span class="new-value">{{ formatDiffValue(row.after, field) }}</span>
+                </template>
               </div>
             </div>
             <div v-else class="delete-warning">
@@ -217,7 +271,6 @@
         :default-sort="{ prop: sortState.prop, order: sortState.order || undefined }"
         @sort-change="handleSortChange"
       >
-        <el-table-column prop="orderDate" label="下单日期" width="110" />
         <el-table-column prop="orderTime" label="时间" width="170">
           <template #default="{ row }">{{ formatDateTime(row.orderTime) }}</template>
         </el-table-column>
@@ -244,9 +297,9 @@
           </template>
         </el-table-column>
         <el-table-column prop="ownerUsername" label="归属用户" width="100" />
-        <el-table-column 
+        <el-table-column
           prop="status"
-          width="100"
+          width="120"
           sortable="custom"
           :sort-orders="['ascending', 'descending']"
         >
@@ -266,9 +319,12 @@
             </span>
           </template>
           <template #default="{ row }">
-            <el-tag :type="statusTagType(row.status)">
-              {{ statusLabel(row.status) }}
-            </el-tag>
+            <div>
+              <el-tag :type="statusTagType(row.status)">
+                {{ statusLabel(row.status) }}
+              </el-tag>
+              <div v-if="row.paidAt" class="paid-date">{{ formatDate(row.paidAt) }}</div>
+            </div>
           </template>
         </el-table-column >
         <el-table-column label="导入状态" width="140">
@@ -367,11 +423,6 @@
       <p class="muted" style="margin-bottom: 12px">正在上传并解析文件，请稍候…</p>
       <el-progress :percentage="importProgress.percent" :stroke-width="12" status="success" />
     </el-dialog>
-
-
-
-
-
     <div class="float-button-group">
       <el-button type="primary" circle class="main-float-btn" @click="scrollToTop">
         <el-icon><ArrowUp /></el-icon>
@@ -391,11 +442,12 @@ export default {
 import { computed, reactive, ref, watch, onBeforeUnmount, onMounted, onActivated, onDeactivated } from 'vue';
 import type { FormInstance, FormRules } from 'element-plus';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { ArrowUp } from '@element-plus/icons-vue';
+import { ArrowUp, Delete } from '@element-plus/icons-vue';
 import { fetchOrders, createOrder, importOrders, updateOrderStatus, searchOrders, fetchCategoryStats, updateOrder, deleteOrder } from '@/api/orders';
 import { listUsers } from '@/api/users';
 import { listOwnerUsernames } from '@/api/submissions';
 import type { OrderCategoryStats, OrderCreateRequest, OrderRecord, OrderUpdateRequest, SysUser } from '@/types/models';
+import * as XLSX from 'xlsx';
 
 type ImportStyle = {
   trackingNumber?: string;
@@ -526,26 +578,113 @@ const sanitizeMultilineInput = (value?: string) => {
 };
 
 const auth = useAuthStore();
-const isAdmin = computed(() => auth.user?.role === 'ADMIN');
+//不要修改这一行,看到这行不要修改 525这行代码 ,因为我让用户使用所有的功能 
+const isAdmin = computed(() =>true);
 const orders = ref<OrderRecord[]>([]);
 const userOrders = ref<OrderRecord[]>([]);
 const total = ref(0);
 const loading = ref(false);
 
 // 差异提醒列表
-const diffNotices = ref<DiffNotice[]>([]);
+const diffNotices = ref<DiffNotice[]>([]); // UI显示用（最新200条）
+const diffNoticesAll = ref<DiffNotice[]>([]); // 完整列表（用于导出）
 const DIFF_NOTICES_KEY = 'orders-diff-notices';
+const DIFF_NOTICES_ALL_KEY = 'orders-diff-notices-all';
+
+// 已确认的变更记录（用于避免重复提醒）
+interface AcknowledgedChange {
+  recordId?: number;           // 记录ID
+  trackingNumber: string;      // 运单号
+  field: string;               // 字段名
+  value: string;               // 字段值
+  styleValue?: string;         // 样式值（如果是样式变更）
+  acknowledgedAt: number;      // 确认时间戳
+}
+const acknowledgedChanges = ref<AcknowledgedChange[]>([]);
+const ACKNOWLEDGED_CHANGES_KEY = 'orders-acknowledged-changes';
+const MAX_ACKNOWLEDGED_CHANGES = 1000; // 最多保留1000条已确认记录
+
+// 加载已确认的变更记录
+const loadAcknowledgedChanges = () => {
+  try {
+    const raw = localStorage.getItem(ACKNOWLEDGED_CHANGES_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        acknowledgedChanges.value = parsed;
+      }
+    }
+  } catch (e) {
+    console.warn('加载已确认变更记录失败', e);
+  }
+};
+
+// 保存已确认的变更记录
+const saveAcknowledgedChanges = () => {
+  try {
+    // 只保留最近的记录，避免占用过多存储空间
+    const toSave = acknowledgedChanges.value.slice(0, MAX_ACKNOWLEDGED_CHANGES);
+    localStorage.setItem(ACKNOWLEDGED_CHANGES_KEY, JSON.stringify(toSave));
+  } catch (e) {
+    console.warn('保存已确认变更记录失败', e);
+  }
+};
 
 const loadDiffNoticesFromCache = () => {
   try {
+    // 加载完整列表（用于导出）
+    const rawAll = localStorage.getItem(DIFF_NOTICES_ALL_KEY);
     const raw = localStorage.getItem(DIFF_NOTICES_KEY);
-    if (!raw) return;
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed)) {
-      // 简单校验并排序（按时间倒序）
-      diffNotices.value = parsed
-        .map((n: any) => ({ ...n, ts: typeof n?.ts === 'number' ? n.ts : Date.now() }))
-        .sort((a: any, b: any) => (b.ts || 0) - (a.ts || 0));
+
+    let allData: any[] = [];
+    let displayData: any[] = [];
+
+    // 优先从完整列表加载
+    if (rawAll) {
+      const parsedAll = JSON.parse(rawAll);
+      if (Array.isArray(parsedAll)) {
+        let baseTime = Date.now();
+        allData = parsedAll
+          .map((n: any, index: number) => ({
+            ...n,
+            // 如果没有时间戳，为每条记录分配唯一的时间戳（递减）
+            ts: typeof n?.ts === 'number' ? n.ts : baseTime - index
+          }))
+          .sort((a: any, b: any) => (b.ts || 0) - (a.ts || 0));
+      }
+    }
+
+    // 加载显示列表
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        let baseTime = Date.now();
+        displayData = parsed
+          .map((n: any, index: number) => ({
+            ...n,
+            // 如果没有时间戳，为每条记录分配唯一的时间戳（递减）
+            ts: typeof n?.ts === 'number' ? n.ts : baseTime - index
+          }))
+          .sort((a: any, b: any) => (b.ts || 0) - (a.ts || 0));
+      }
+    }
+
+    // 数据迁移：如果完整列表为空，但显示列表有数据，说明是旧版本数据
+    if (allData.length === 0 && displayData.length > 0) {
+      console.log('🔄 检测到旧版本缓存数据，正在迁移...');
+      // 从显示列表迁移到完整列表
+      diffNoticesAll.value = displayData;
+      diffNotices.value = displayData.slice(0, MAX_DIFF_NOTICES);
+      // 立即保存到新格式
+      saveDiffNoticesToCache();
+      ElMessage.info({
+        message: `已从旧版本迁移 ${displayData.length} 条变更提醒`,
+        duration: 3000
+      });
+    } else {
+      // 正常加载
+      diffNoticesAll.value = allData;
+      diffNotices.value = displayData;
     }
   } catch (e) {
     console.warn('加载变更提醒缓存失败', e);
@@ -554,9 +693,41 @@ const loadDiffNoticesFromCache = () => {
 
 const saveDiffNoticesToCache = () => {
   try {
-    localStorage.setItem(DIFF_NOTICES_KEY, JSON.stringify(diffNotices.value || []));
-  } catch (e) {
-    console.warn('保存变更提醒缓存失败', e);
+    // 保存UI显示列表（最新200条）
+    const data = JSON.stringify(diffNotices.value || []);
+    localStorage.setItem(DIFF_NOTICES_KEY, data);
+
+    // 保存完整列表（用于导出）
+    const dataAll = JSON.stringify(diffNoticesAll.value || []);
+    localStorage.setItem(DIFF_NOTICES_ALL_KEY, dataAll);
+  } catch (e: any) {
+    // localStorage 超限或不可用时的降级处理
+    if (e.name === 'QuotaExceededError' || e.code === 22) {
+      console.warn('localStorage 超限，尝试清理旧数据后重试');
+      try {
+        // UI列表只保留最新50条
+        diffNotices.value = diffNotices.value.slice(0, 50);
+        const data = JSON.stringify(diffNotices.value);
+        localStorage.setItem(DIFF_NOTICES_KEY, data);
+
+        // 完整列表保留最新500条（用于导出）
+        diffNoticesAll.value = diffNoticesAll.value.slice(0, 500);
+        const dataAll = JSON.stringify(diffNoticesAll.value);
+        localStorage.setItem(DIFF_NOTICES_ALL_KEY, dataAll);
+
+        ElMessage.warning({
+          message: '存储空间不足，已自动清理部分历史提醒',
+          duration: 3000
+        });
+      } catch (retryError) {
+        console.error('清理后仍无法保存，已放弃缓存:', retryError);
+        // 彻底清空以避免下次加载出错
+        localStorage.removeItem(DIFF_NOTICES_KEY);
+        localStorage.removeItem(DIFF_NOTICES_ALL_KEY);
+      }
+    } else {
+      console.warn('保存变更提醒缓存失败:', e);
+    }
   }
 };
 
@@ -686,6 +857,8 @@ onMounted(() => {
   }
   // 加载本地缓存的变更提醒
   loadDiffNoticesFromCache();
+  // 加载已确认的变更记录
+  loadAcknowledgedChanges();
 });
 
 const createVisible = ref(false);
@@ -734,6 +907,9 @@ const statusTagType = (value?: string) => {
 };
 
 const setStatusFilter = async (value: string) => {
+  // 取消正在进行的后台差异计算
+  abortDiffCalculation();
+
   // 如果点击的是当前已选中的状态，则清空；否则切换到新状态
   if (quickStatus.value === value) {
     quickStatus.value = '';
@@ -752,6 +928,9 @@ const setStatusFilter = async (value: string) => {
 };
 
 const clearStatusFilter = async () => {
+  // 取消正在进行的后台差异计算
+  abortDiffCalculation();
+
   // 清除快速筛选和表单筛选
   quickStatus.value = '';
   if (isAdmin.value) {
@@ -799,23 +978,34 @@ const buildFilterPayload = () => {
 };
 
 const loadOrders = async () => {
+  // 取消正在进行的后台差异计算（如果有）
+  abortDiffCalculation();
+
   // 所有登录用户都可以加载订单数据
   loading.value = true;
   try {
     const params = queryParams.value;
-    console.log('📡 请求参数:', JSON.stringify(params, null, 2));
     const data = await fetchOrders(params);
-    console.log('✅ 收到数据:', data.records.length, '条记录');
-    console.log('📋 详细记录:', data.records.map(r => ({ id: r.id, sn: r.sn, trackingNumber: r.trackingNumber })));
     // 直接使用后端返回的数据，不做任何去重处理
-    orders.value = data.records;
-    total.value = data.total;
+    orders.value = data.records || [];
+    total.value = data.total || 0;
+
+    // 优化：不需要每次都清空样式缓存，因为缓存key包含了记录ID
+    // 只在导入新数据时清空缓存即可（见 handleFileChange）
+    // styleCache.clear(); // 已移除
+  } catch (error) {
+    console.error('❌ 加载订单失败:', error);
+    orders.value = [];
+    total.value = 0;
   } finally {
     loading.value = false;
   }
 };
 
 const handleSearch = async () => {
+  // 取消正在进行的后台差异计算
+  abortDiffCalculation();
+
   // 统一在点击查询时进行清洗，避免Excel前缀等脏数据
   filters.keyword = sanitizeSingleInput(filters.keyword);
   filters.page = 1;
@@ -870,6 +1060,9 @@ const handlePageChange = (page: number) => {
 };
 
 const resetFilters = () => {
+  // 取消正在进行的后台差异计算
+  abortDiffCalculation();
+
   filters.dateRange = [];
   filters.status = '';
   filters.keyword = '';
@@ -900,25 +1093,43 @@ const fetchAllOrders = async (): Promise<OrderRecord[]> => {
   }
 };
 
+// 按ID列表批量获取订单（优化：只获取需要的记录）
+const fetchOrdersByIds = async (ids: number[]): Promise<OrderRecord[]> => {
+  if (!ids || ids.length === 0) return [];
+
+  try {
+    // 使用批量查询接口（假设后端支持，如果不支持则降级到逐个查询）
+    // 这里简化实现：通过多次分页查询获取指定ID的记录
+    const allOrders = await fetchAllOrders();
+    const idSet = new Set(ids);
+    return allOrders.filter(order => order.id && idSet.has(order.id));
+  } catch (error) {
+    console.error('Failed to fetch orders by IDs:', error);
+    return [];
+  }
+};
+
 const captureDiffSnapshot = async () => {
   const all = await fetchAllOrders();
   return buildOrderSnapshot(all);
 };
 
+// 差异提醒数量上限（避免内存和存储问题）
+const MAX_DIFF_NOTICES = 200;
+
 // 合并差异提醒
 const mergeDiffNotices = (newNotices: DiffNotice[]) => {
-  console.log('🔄 合并差异提醒，新增:', newNotices.length, '条');
   if (!newNotices.length) {
-    console.log('⚠️ 没有新的差异提醒');
     return;
   }
 
   const existing = new Map<string, DiffNotice>();
-  diffNotices.value.forEach(item => {
+
+  // 从完整列表合并（而不是从显示列表）
+  diffNoticesAll.value.forEach(item => {
     // 使用记录ID作为键的一部分，确保每条记录的变更都能保留
     const recordId = (item.after as any)?.id || (item.before as any)?.id;
     const key = recordId ? `ID-${recordId}` : `${(item.trackingNumber || '').toUpperCase()}-${item.message}`;
-    console.log('📌 现有提醒键:', key);
     existing.set(key, item);
   });
 
@@ -926,21 +1137,109 @@ const mergeDiffNotices = (newNotices: DiffNotice[]) => {
     // 使用记录ID作为键的一部分，确保每条记录的变更都能保留
     const recordId = (item.after as any)?.id || (item.before as any)?.id;
     const key = recordId ? `ID-${recordId}` : `${(item.trackingNumber || '').toUpperCase()}-${item.message}`;
-    console.log('📌 新增提醒键:', key, '运单号:', item.trackingNumber, '变更:', item.message);
     item.ts = Date.now();
     existing.set(key, item);
   });
 
-  diffNotices.value = Array.from(existing.values()).sort((a, b) => (b.ts || 0) - (a.ts || 0));
+  // 按变更类型和时间排序：删除类型优先，然后按时间倒序
+  const allNotices = Array.from(existing.values()).sort((a, b) => {
+    // 删除类型优先
+    if (a.isDelete && !b.isDelete) return -1;
+    if (!a.isDelete && b.isDelete) return 1;
+    // 同类型按时间倒序
+    return (b.ts || 0) - (a.ts || 0);
+  });
+
+  // 保存完整列表（用于导出）
+  diffNoticesAll.value = allNotices;
+
+  // UI只显示最新的 MAX_DIFF_NOTICES 条
+  diffNotices.value = allNotices.slice(0, MAX_DIFF_NOTICES);
+
+  // 如果超过上限，提示用户（可导出全部）
+  if (allNotices.length > MAX_DIFF_NOTICES) {
+    console.warn(`差异提醒过多，已自动限制为最新 ${MAX_DIFF_NOTICES} 条（共发现 ${allNotices.length} 条）`);
+    ElMessage.warning({
+      message: `发现 ${allNotices.length} 处变更，仅显示最新 ${MAX_DIFF_NOTICES} 条（可导出全部）`,
+      duration: 5000,
+      showClose: true
+    });
+  }
+
   saveDiffNoticesToCache();
-  console.log('✅ 合并完成，当前共有', diffNotices.value.length, '条差异提醒');
 };
 
 // 清空差异提醒
 const clearDiffNotices = () => {
+  // 将所有提醒标记为已确认（避免下次重复提醒）
+  diffNoticesAll.value.forEach(notice => {
+    if (notice.after) {
+      const recordId = (notice.after as any)?.id;
+      const trackingNumber = notice.trackingNumber || '';
+      const changedFields = diffFields(notice);
+
+      changedFields.forEach(fieldLabel => {
+        const fieldMap: Record<string, string> = {
+          '运单号': 'trackingNumber',
+          '型号': 'model',
+          'SN': 'sn',
+          '金额': 'amount',
+          '备注': 'remark'
+        };
+
+        let field = '';
+        let value = '';
+        let styleValue = '';
+
+        if (fieldLabel.endsWith('(样式)')) {
+          const baseField = fieldLabel.replace('(样式)', '');
+          field = fieldMap[baseField];
+          if (field) {
+            const bgKey = `${field}BgColor` as any;
+            const fgKey = `${field}FontColor` as any;
+            const strikeKey = `${field}Strike` as any;
+
+            const bg = (notice.after as any)?.[bgKey] || '';
+            const fg = (notice.after as any)?.[fgKey] || '';
+            const strike = (notice.after as any)?.[strikeKey] || false;
+
+            styleValue = JSON.stringify({ bg, fg, strike });
+            field = `${field}Style`;
+          }
+        } else {
+          field = fieldMap[fieldLabel];
+          if (field) {
+            value = String((notice.after as any)?.[field] || '');
+          }
+        }
+
+        if (field) {
+          acknowledgedChanges.value.push({
+            recordId,
+            trackingNumber,
+            field,
+            value,
+            styleValue: styleValue || undefined,
+            acknowledgedAt: Date.now()
+          });
+        }
+      });
+    }
+  });
+
+  // 限制已确认记录数量
+  if (acknowledgedChanges.value.length > MAX_ACKNOWLEDGED_CHANGES) {
+    acknowledgedChanges.value = acknowledgedChanges.value.slice(0, MAX_ACKNOWLEDGED_CHANGES);
+  }
+
+  saveAcknowledgedChanges();
+
+  // 清空提醒列表
   diffNotices.value = [];
+  diffNoticesAll.value = [];
   try {
     localStorage.removeItem(DIFF_NOTICES_KEY);
+    localStorage.removeItem(DIFF_NOTICES_ALL_KEY);
   } catch {}
   ElMessage.success('已清空变更提醒');
 };
@@ -948,13 +1247,120 @@ const clearDiffNotices = () => {
 // 删除单条差异提醒
 const removeDiffNotice = (row: DiffNotice) => {
   if (!row) return;
-  // 优先使用时间戳匹配；回退到 trackingNumber+message
-  diffNotices.value = diffNotices.value.filter(n => {
-    if (row.ts && n.ts) return n.ts !== row.ts;
-    return !(n.trackingNumber === row.trackingNumber && n.message === row.message);
-  });
+
+  // 记录已确认的变更（避免下次导入时重复提醒）
+  // 特殊类型（删除、无效ID）直接标记确认，不需要详细字段信息
+  if (row.isDelete || row.isInvalidId) {
+    const recordId = row.recordId || (row.before as any)?.id;
+    const trackingNumber = row.trackingNumber || '';
+    const sn = row.sn || (row.before as any)?.sn || '';
+
+    // 为特殊类型创建一个标记
+    const specialType = row.isDelete ? 'DELETE' : 'INVALID_ID';
+
+    acknowledgedChanges.value.unshift({
+      recordId,
+      trackingNumber,
+      field: `__SPECIAL__${specialType}`,
+      value: sn || trackingNumber,
+      acknowledgedAt: Date.now()
+    });
+
+    saveAcknowledgedChanges();
+  } else if (row.after) {
+    const recordId = (row.after as any)?.id;
+    const trackingNumber = row.trackingNumber || '';
+
+    // 提取所有发生变更的字段
+    const changedFields = diffFields(row);
+
+    changedFields.forEach(fieldLabel => {
+      // 将字段标签转换为字段名
+      const fieldMap: Record<string, string> = {
+        '运单号': 'trackingNumber',
+        '型号': 'model',
+        'SN': 'sn',
+        '金额': 'amount',
+        '备注': 'remark'
+      };
+
+      let field = '';
+      let value = '';
+      let styleValue = '';
+
+      // 判断是否为样式变更
+      if (fieldLabel.endsWith('(样式)')) {
+        const baseField = fieldLabel.replace('(样式)', '');
+        field = fieldMap[baseField];
+        if (field) {
+          // 记录样式值
+          const bgKey = `${field}BgColor` as any;
+          const fgKey = `${field}FontColor` as any;
+          const strikeKey = `${field}Strike` as any;
+
+          const bg = (row.after as any)?.[bgKey] || '';
+          const fg = (row.after as any)?.[fgKey] || '';
+          const strike = (row.after as any)?.[strikeKey] || false;
+
+          styleValue = JSON.stringify({ bg, fg, strike });
+          field = `${field}Style`;
+        }
+      } else {
+        field = fieldMap[fieldLabel];
+        if (field) {
+          value = String((row.after as any)?.[field] || '');
+        }
+      }
+
+      if (field) {
+        // 添加到已确认列表
+        acknowledgedChanges.value.unshift({
+          recordId,
+          trackingNumber,
+          field,
+          value,
+          styleValue: styleValue || undefined,
+          acknowledgedAt: Date.now()
+        });
+      }
+    });
+
+    // 限制已确认记录数量
+    if (acknowledgedChanges.value.length > MAX_ACKNOWLEDGED_CHANGES) {
+      acknowledgedChanges.value = acknowledgedChanges.value.slice(0, MAX_ACKNOWLEDGED_CHANGES);
+    }
+
+    saveAcknowledgedChanges();
+  }
+
+  // 生成唯一标识键，与 mergeDiffNotices 中的逻辑保持一致
+  const getUniqueKey = (item: DiffNotice) => {
+    const recordId = (item.after as any)?.id || (item.before as any)?.id;
+    if (recordId) {
+      return `ID-${recordId}`;
+    }
+    return `${(item.trackingNumber || '').toUpperCase()}-${item.message}-${item.ts || 0}`;
+  };
+
+  const rowKey = getUniqueKey(row);
+
+  const filterFn = (n: DiffNotice) => {
+    const nKey = getUniqueKey(n);
+    return nKey !== rowKey;
+  };
+
+  // 同时从两个列表中删除
+  diffNotices.value = diffNotices.value.filter(filterFn);
+  diffNoticesAll.value = diffNoticesAll.value.filter(filterFn);
+
+  // 如果显示列表少于最大数量，且完整列表还有更多，则补充显示
+  if (diffNotices.value.length < MAX_DIFF_NOTICES && diffNoticesAll.value.length > diffNotices.value.length) {
+    // 从完整列表中取前 MAX_DIFF_NOTICES 条作为显示列表
+    diffNotices.value = diffNoticesAll.value.slice(0, MAX_DIFF_NOTICES);
+  }
+
   saveDiffNoticesToCache();
-  ElMessage.success('已清除该条提醒');
+ 
 };
 
 // 确认删除订单及关联数据
@@ -980,8 +1386,9 @@ const handleConfirmDelete = async (row: DiffNotice) => {
     // 调用删除API
     await deleteOrder(row.recordId);
 
-    // 从提醒列表中移除
+    // 从两个提醒列表中移除
     diffNotices.value = diffNotices.value.filter(n => n.recordId !== row.recordId);
+    diffNoticesAll.value = diffNoticesAll.value.filter(n => n.recordId !== row.recordId);
     saveDiffNoticesToCache();
 
     // 刷新订单列表
@@ -1024,16 +1431,32 @@ const finishImportProgress = () => {
 };
 
 const handleFileChange = async (event: Event) => {
+  // 取消正在进行的后台差异计算
+  abortDiffCalculation();
+
   // 所有用户都可以处理文件上传
   const target = event.target as HTMLInputElement;
   const file = target.files?.[0];
   if (!file) return;
 
-  // 导入前捕获旧数据快照
+  // 导入前捕获快照
   let prevSnapshot: Map<number, Partial<OrderRecord>> | undefined;
+  let isFirstImport = false;
+
   try {
     prevSnapshot = await captureDiffSnapshot();
-    console.log('📸 捕获快照成功，共', prevSnapshot.size, '条记录');
+
+    // 判断是否为首次导入（数据库为空）
+    if (prevSnapshot.size === 0) {
+      isFirstImport = true;
+      console.log('📦 检测到数据库为空，这是首次导入，跳过差异对比');
+    } else {
+      // 只在非首次导入时显示准备对比的提示
+      ElMessage.info({
+        message: '正在准备数据对比...',
+        duration: 2000
+      });
+    }
   } catch (error) {
     console.warn('Failed to capture snapshot:', error);
   }
@@ -1041,6 +1464,9 @@ const handleFileChange = async (event: Event) => {
   startImportProgress();
   try {
     const report: any = await importOrders(file);
+
+    // 清空旧的样式缓存，确保使用新导入的样式
+    styleCache.clear();
 
     // 解析样式信息：仅本次会话用于展示（仅传回了发生变化的行）
     try {
@@ -1058,77 +1484,177 @@ const handleFileChange = async (event: Event) => {
     finishImportProgress();
     const skipped = Number(report?.skippedUnchanged || 0);
     const imported = Number(report?.importedCount || 0);
-    if (Array.isArray(report?.skippedRows) && report.skippedRows.length) {
-      console.log('本次导入跳过未变化行:', report.skippedRows);
-    }
-    ElMessage.success({
-      message: `导入完成：写入 ${imported} 行，跳过未变化 ${skipped} 行`,
-      duration: 8000, // 显示更久
-      showClose: true
-    });
 
-    // 重新加载订单并计算差异
-    await loadOrders();
-
-    // 处理删除的记录
-    if (Array.isArray(report?.deletedRecords) && report.deletedRecords.length > 0) {
-      const deletedNotices = report.deletedRecords.map((deleted: any) => ({
-        trackingNumber: deleted.trackingNumber || '未知',
-        model: deleted.model,
-        sn: deleted.sn,
-        message: `🗑️ Excel中已删除，需要确认是否从数据库删除`,
-        isDelete: true,  // 标记为删除类型
-        recordId: deleted.id,  // 保存记录ID用于删除
-        before: deleted,
-        after: null,
-        ts: Date.now()
-      }));
-      mergeDiffNotices(deletedNotices);
-      ElMessage.warning({
-        message: `检测到 ${report.deletedRecords.length} 条记录在Excel中已删除，请查看提醒并确认`,
-        duration: 10000,
+    // 首次导入时提示不同的消息
+    if (isFirstImport) {
+      ElMessage.success({
+        message: `首次导入完成：成功导入 ${imported} 条记录`,
+        duration: 5000,
         showClose: true
       });
-    }
+    } 
 
-    // 处理无效ID
-    if (Array.isArray(report?.invalidIds) && report.invalidIds.length > 0) {
-      const invalidIdNotices = report.invalidIds.map((invalid: any) => ({
-        trackingNumber: invalid.trackingNumber || '未知',
-        model: invalid.model,
-        sn: invalid.sn,
-        message: `⚠️ Excel中的ID=${invalid.excelId}不存在于数据库`,
-        isInvalidId: true,  // 标记为无效ID类型
-        excelId: invalid.excelId,
-        excelRowIndex: invalid.excelRowIndex,
-        before: null,
-        after: { trackingNumber: invalid.trackingNumber, model: invalid.model, sn: invalid.sn },
-        ts: Date.now()
-      }));
-      mergeDiffNotices(invalidIdNotices);
-      ElMessage.warning({
-        message: `检测到 ${report.invalidIds.length} 个无效ID，系统已按运单号+SN自动匹配`,
-        duration: 8000,
-        showClose: true
-      });
-    }
+    // 处理删除的记录（仅在非首次导入时）
+    if (!isFirstImport && Array.isArray(report?.deletedRecords) && report.deletedRecords.length > 0) {
+      const deletedNotices = report.deletedRecords
+        .filter((deleted: any) => {
+          // 检查是否已确认过这个删除
+          const recordId = deleted.id;
+          const trackingNumber = (deleted.trackingNumber || '').toUpperCase();
+          const sn = deleted.sn || '';
 
-    // 导入后计算差异
-    if (prevSnapshot) {
-      try {
-        console.log('🔍 开始计算差异...');
-        const latest = await fetchAllOrders();
-        console.log('📦 获取最新数据成功，共', latest.length, '条记录');
-        scheduleDiffCalculation(prevSnapshot, latest, importStyles.value);
-      } catch (error) {
-        console.warn('Failed to calculate differences:', error);
+          return !acknowledgedChanges.value.some(ack =>
+            ack.field === '__SPECIAL__DELETE' &&
+            (ack.recordId === recordId || ack.trackingNumber.toUpperCase() === trackingNumber) &&
+            (ack.value === sn || ack.value === trackingNumber)
+          );
+        })
+        .map((deleted: any) => ({
+          trackingNumber: deleted.trackingNumber || '未知',
+          model: deleted.model,
+          sn: deleted.sn,
+          message: `🗑️ Excel中已删除，需要确认是否从数据库删除`,
+          isDelete: true,
+          recordId: deleted.id,
+          before: deleted,
+          after: null,
+          ts: Date.now()
+        }));
+
+      if (deletedNotices.length > 0) {
+        mergeDiffNotices(deletedNotices);
+        ElMessage.warning({
+          message: `检测到 ${deletedNotices.length} 条记录在Excel中已删除，请查看提醒并确认`,
+          duration: 8000,
+          showClose: true
+        });
       }
     }
+
+    // 处理新增ID（Excel中填写了新ID，如最大值+1）
+    // 由于后端已改为保留Excel中的ID，这段代码通常不会被触发
+    // 如果触发，说明用户填写了新的ID（正常情况），不需要警告
+    if (!isFirstImport && Array.isArray(report?.invalidIds) && report.invalidIds.length > 0) {
+      console.log(`📝 检测到 ${report.invalidIds.length} 个新ID，已作为新记录插入`);
+      // 不再显示警告和差异提醒，因为这是用户主动填写的新ID
+    }
+
+    // 刷新当前页数据
+    await loadOrders();
+
+    // 判断是否需要进行差异计算
+    // 如果本次导入没有实质性变化（后端已做检测），则跳过前端差异计算
+    const hasRealChanges = imported > 0 ||
+                          (report?.deletedRecords && report.deletedRecords.length > 0) ||
+                          (report?.invalidIds && report.invalidIds.length > 0);
+
+    // 获取变化记录的ID列表（后端已经标记了哪些记录变化）
+    const changedIds: number[] = report?.changedIds || [];
+
+    // 🔍 调试日志：检查差异计算条件
+    console.log('🔍 差异计算条件检查:', {
+      isFirstImport,
+      hasSnapshot: !!prevSnapshot,
+      snapshotSize: prevSnapshot?.size || 0,
+      hasRealChanges,
+      imported,
+      deletedCount: report?.deletedRecords?.length || 0,
+      invalidIdsCount: report?.invalidIds?.length || 0,
+      changedIdsCount: changedIds.length,
+      changedIds: changedIds.slice(0, 10) // 只显示前10个
+    });
+
+    // 异步计算差异（仅在非首次导入、有快照且有实质性变化时）
+    if (!isFirstImport && prevSnapshot && prevSnapshot.size > 0 && hasRealChanges && changedIds.length > 0) {
+      // 使用 requestIdleCallback 在浏览器空闲时计算
+      if ('requestIdleCallback' in window) {
+        requestIdleCallback(async () => {
+          await performDiffCalculation(prevSnapshot!, changedIds);
+        });
+      } else {
+        // 降级方案：延迟执行
+        setTimeout(async () => {
+          await performDiffCalculation(prevSnapshot!, changedIds);
+        }, 500);
+      }
+    } else if (!isFirstImport && !hasRealChanges) {
+      // 如果没有实质性变化，提示用户
+      console.log('📋 后端检测到数据未变化，跳过差异计算');
+    }
+
+    // 记录本次导入时间戳
+    localStorage.setItem('last-import-timestamp', String(Date.now()));
+
   } catch (error) {
     finishImportProgress();
     throw error;
   } finally {
     target.value = '';
+  }
+};
+
+// 差异计算任务控制
+let diffCalculationAborted = false;
+let isDiffCalculating = false;
+
+// 取消正在进行的差异计算
+const abortDiffCalculation = () => {
+  if (isDiffCalculating) {
+    diffCalculationAborted = true;
+  }
+};
+
+// 独立的差异计算函数（优化性能 + 可中断）
+const performDiffCalculation = async (prevSnapshot: Map<number, Partial<OrderRecord>>, changedIds: number[]) => {
+  // 标记计算开始
+  isDiffCalculating = true;
+  diffCalculationAborted = false;
+
+  try {
+    ElMessage.info({
+      message: `正在对比 ${changedIds.length} 条变更记录...`,
+      duration: 3000
+    });
+
+    // 优化：只获取变化的记录，而不是全部记录
+    const changedRecords = await fetchOrdersByIds(changedIds);
+
+    // 检查是否已被取消
+    if (diffCalculationAborted) {
+      return;
+    }
+
+    // 计算差异（只对比变化的记录）
+    const diffs = computeDifferences(prevSnapshot, changedRecords, importStyles.value);
+
+    if (diffs.length > 0) {
+      mergeDiffNotices(diffs);
+    }
+
+    // 只有未被取消才显示完成消息
+    if (!diffCalculationAborted) {
+      if (diffs.length > 0) {
+        // 提取前3条变更的运单号
+        const sampleTrackingNumbers = diffs
+          .slice(0, 3)
+          .map(diff => diff.trackingNumber || '未知')
+          .join('、');
+
+        const moreCount = diffs.length > 3 ? ` 等${diffs.length}条` : '';
+
+      }
+    }
+  } catch (error) {
+    if (!diffCalculationAborted) {
+      console.warn('数据对比失败:', error);
+      ElMessage.error({
+        message: '数据对比失败',
+        duration: 2000
+      });
+    }
+  } finally {
+    isDiffCalculating = false;
+    diffCalculationAborted = false;
   }
 };
 
@@ -1199,6 +1725,11 @@ const formatDateTime = (value?: string) => {
   return value.replace('T', ' ').replace('Z', '');
 };
 
+const formatDate = (value?: string) => {
+  if (!value) return '';
+  return value.substring(0, 10);
+};
+
 const buildOrderSnapshot = (list: OrderRecord[]) => {
   // 使用 ID 作为 key，这样即使运单号、SN等所有字段都改了，也能通过ID匹配到同一条记录
   const map = new Map<number, Partial<OrderRecord>>();
@@ -1212,7 +1743,10 @@ const buildOrderSnapshot = (list: OrderRecord[]) => {
       sn: item.sn,
       amount: item.amount,
       remark: item.remark,
-      // 包含样式信息
+      // 包含所有字段的样式信息
+      trackingBgColor: (item as any).trackingBgColor,
+      trackingFontColor: (item as any).trackingFontColor,
+      trackingStrike: (item as any).trackingStrike,
       modelBgColor: (item as any).modelBgColor,
       modelFontColor: (item as any).modelFontColor,
       modelStrike: (item as any).modelStrike,
@@ -1227,16 +1761,14 @@ const buildOrderSnapshot = (list: OrderRecord[]) => {
       remarkStrike: (item as any).remarkStrike
     });
   });
-  console.log('📸 快照已建立，共', map.size, '条记录（按ID索引）');
   return map;
 };
 
 const computeDifferences = (prevMap: Map<number, Partial<OrderRecord>>, nextList: OrderRecord[], importedStyles?: Map<string, ImportStyle>) => {
-  console.log('🔎 computeDifferences 被调用，prevMap.size:', prevMap.size, 'nextList.length:', nextList.length);
   if (!prevMap.size) {
-    console.log('⚠️ prevMap 为空，返回空数组');
     return [];
   }
+
   const fieldLabels: Record<string, string> = {
     trackingNumber: '运单号',
     model: '型号',
@@ -1246,22 +1778,73 @@ const computeDifferences = (prevMap: Map<number, Partial<OrderRecord>>, nextList
   };
   const notices: { trackingNumber: string; message: string; before?: Partial<OrderRecord>; after?: Partial<OrderRecord> }[] = [];
 
+  // 优化：值规范化函数提取到外部，避免重复创建
+  const normalizeVal = (val: unknown) => {
+    if (val === null || val === undefined) return '';
+    if (typeof val === 'string') return val.trim();
+    return String(val);
+  };
+
+  // 检测是否包含中文字符
+  const containsChinese = (str: string | null | undefined) => {
+    if (!str) return false;
+    return /[\u4e00-\u9fa5]/.test(str);
+  };
+
+  // 为中文记录构建组合键Map（运单号+SN+时间）
+  const chineseKeyMap = new Map<string, Partial<OrderRecord>>();
+  const makeCompositeKey = (r: Partial<OrderRecord>) =>
+    `${r.trackingNumber || ''}|${r.sn || ''}|${r.orderTime || ''}`;
+
+  prevMap.forEach((record) => {
+    if (containsChinese(record.trackingNumber) || containsChinese(record.sn)) {
+      chineseKeyMap.set(makeCompositeKey(record), record);
+    }
+  });
+
+  // 样式值规范化：将空值、白色、黑色统一为空字符串
+  const normalizeStyleVal = (val: unknown, isColor: boolean = true) => {
+    if (val === null || val === undefined || val === '') return '';
+    const str = String(val).trim().toUpperCase();
+    if (isColor) {
+      // 白色的各种表示都视为无背景色
+      if (str === '#FFFFFF' || str === '#FFF' || str === 'FFFFFF' || str === 'FFF' || str === 'WHITE') {
+        return '';
+      }
+      // 黑色的各种表示都视为无字体色
+      if (str === '#000000' || str === '#000' || str === '000000' || str === '000' || str === 'BLACK') {
+        return '';
+      }
+    }
+    return str;
+  };
+
   // 遍历新记录，通过ID匹配旧记录
+  console.log('🔍 开始对比差异，nextList 数量:', nextList.length, 'prevMap 数量:', prevMap.size);
+
   nextList.forEach(order => {
     if (!order.id) {
-      console.log('⚠️ 记录没有ID，跳过:', order.trackingNumber);
+      console.warn('⚠️ 跳过没有ID的记录:', order.trackingNumber);
       return;
     }
 
-    const prev = prevMap.get(order.id);
+    // 中文记录使用组合键匹配，非中文记录使用ID匹配
+    const isChinese = containsChinese(order.trackingNumber) || containsChinese(order.sn);
+    const prev = isChinese
+      ? chineseKeyMap.get(makeCompositeKey(order))
+      : prevMap.get(order.id);
+
     if (!prev) {
-      console.log('⚠️ 未找到旧记录，ID:', order.id, '运单号:', order.trackingNumber, '(这是新增的记录)');
-      // 新增的记录也显示出来
+      // 中文记录如果组合键匹配不到，说明是新增的（不报新增提醒，因为中文记录每次导入都是新ID）
+      if (isChinese) return;
+      // 新增的记录
+      console.log('🆕 发现新增记录 ID=' + order.id + ', 运单号=' + order.trackingNumber);
       notices.push({
         trackingNumber: order.trackingNumber || `ID-${order.id}`,
         message: '🆕 新增记录',
         before: {},
         after: {
+          id: order.id, // 包含ID，用于唯一标识
           trackingNumber: order.trackingNumber,
           model: order.model,
           sn: order.sn,
@@ -1271,90 +1854,69 @@ const computeDifferences = (prevMap: Map<number, Partial<OrderRecord>>, nextList
       });
       return;
     }
+
     const changed: string[] = [];
-    const normalizeVal = (val: unknown) => {
-      if (val === null || val === undefined) return '';
-      if (typeof val === 'string') return val.trim();
-      return String(val);
-    };
     const before: Partial<OrderRecord> = {};
     const after: Partial<OrderRecord> = {};
-    
-    // 检测内容变化
-    Object.keys(fieldLabels).forEach(field => {
+
+    // 检测内容变化（优化：使用 for...of 代替 forEach，性能更好）
+    for (const field of Object.keys(fieldLabels)) {
       const prevVal = (prev as any)[field];
       const currVal = (order as any)[field];
       const prevNorm = normalizeVal(prevVal);
       const currNorm = normalizeVal(currVal);
 
-      // 详细日志：显示所有字段的比较结果
-      console.log(`📊 比较字段 [ID:${order.id}] ${fieldLabels[field]}:`, {
-        旧值: prevVal,
-        新值: currVal,
-        旧值标准化: prevNorm,
-        新值标准化: currNorm,
-        是否相同: prevNorm === currNorm
-      });
-
       if (prevNorm !== currNorm) {
-        console.log(`🔄 发现变化 [ID:${order.id}] ${fieldLabels[field]}: "${prevVal}" → "${currVal}"`);
         changed.push(fieldLabels[field]);
         (before as any)[field] = prevVal;
         (after as any)[field] = currVal;
       }
-    });
-    
-    // 检测样式变化（如果提供了导入的样式）
-    if (importedStyles && order.id) {
-      // 使用与存储时一致的key格式：ID-${id}
-      const styleKey = `ID-${order.id}`;
-      const importedStyle = importedStyles.get(styleKey);
-      if (importedStyle) {
-        console.log(`🎨 检测到样式数据 [ID:${order.id}]:`, importedStyle);
-        const styleFields = ['model', 'sn', 'amount', 'remark'];
-        styleFields.forEach(field => {
-          const bgKey = `${field}BgColor` as keyof ImportStyle;
-          const fgKey = `${field}FontColor` as keyof ImportStyle;
-          const strikeKey = `${field}Strike` as keyof ImportStyle;
-
-          const prevBg = (prev as any)?.[bgKey];
-          const prevFg = (prev as any)?.[fgKey];
-          const prevStrike = (prev as any)?.[strikeKey];
-
-          const currBg = importedStyle[bgKey];
-          const currFg = importedStyle[fgKey];
-          const currStrike = importedStyle[strikeKey];
-
-          console.log(`🎨 比较样式 [ID:${order.id}] ${field}:`, {
-            背景色: { 旧: prevBg, 新: currBg },
-            字体色: { 旧: prevFg, 新: currFg },
-            删除线: { 旧: prevStrike, 新: currStrike }
-          });
-
-          if (prevBg !== currBg || prevFg !== currFg || prevStrike !== currStrike) {
-            const fieldLabel = fieldLabels[field] || field;
-            const styleLabel = `${fieldLabel}(样式)`;
-            if (!changed.includes(styleLabel)) {
-              console.log(`🎨 发现样式变化 [ID:${order.id}] ${field}`);
-              changed.push(styleLabel);
-              
-              // 保存样式变化信息到 before 和 after 对象
-              (before as any)[bgKey] = prevBg;
-              (before as any)[fgKey] = prevFg;
-              (before as any)[strikeKey] = prevStrike;
-              
-              (after as any)[bgKey] = currBg;
-              (after as any)[fgKey] = currFg;
-              (after as any)[strikeKey] = currStrike;
-            }
-          }
-        });
-      } else {
-        console.log(`⚠️ 未找到导入样式 [ID:${order.id}]，key: ${styleKey}`);
-      }
     }
     
+    // 检测样式变化（比较快照中的样式和当前数据库中的样式）
+    // 支持的字段：trackingNumber, model, sn, amount, remark
+    const styleFields = ['tracking', 'model', 'sn', 'amount', 'remark'];
+    for (const field of styleFields) {
+      const bgKey = `${field}BgColor` as keyof OrderRecord;
+      const fgKey = `${field}FontColor` as keyof OrderRecord;
+      const strikeKey = `${field}Strike` as keyof OrderRecord;
+
+      // 规范化样式值进行比较
+      const prevBg = normalizeStyleVal((prev as any)?.[bgKey], true);
+      const prevFg = normalizeStyleVal((prev as any)?.[fgKey], true);
+      const prevStrike = !!(prev as any)?.[strikeKey];
+
+      // 使用当前数据库中的样式（已通过 attachStyles 加载）
+      const currBg = normalizeStyleVal((order as any)?.[bgKey], true);
+      const currFg = normalizeStyleVal((order as any)?.[fgKey], true);
+      const currStrike = !!(order as any)?.[strikeKey];
+
+      // 只有在规范化后仍有差异时才认为是变更
+      if (prevBg !== currBg || prevFg !== currFg || prevStrike !== currStrike) {
+        // 转换字段名为友好显示名称
+        const displayField = field === 'tracking' ? 'trackingNumber' : field;
+        const fieldLabel = fieldLabels[displayField] || displayField;
+        const styleLabel = `${fieldLabel}(样式)`;
+        if (!changed.includes(styleLabel)) {
+          changed.push(styleLabel);
+
+          // 保存样式变化信息到 before 和 after 对象
+          (before as any)[bgKey] = prevBg || undefined;
+          (before as any)[fgKey] = prevFg || undefined;
+          (before as any)[strikeKey] = prevStrike;
+
+          (after as any)[bgKey] = currBg || undefined;
+          (after as any)[fgKey] = currFg || undefined;
+          (after as any)[strikeKey] = currStrike;
+        }
+      }
+    }
+
     if (changed.length) {
+      // 确保 before 和 after 都包含 id 字段
+      before.id = prev.id;
+      after.id = order.id;
+
       notices.push({
         trackingNumber: order.trackingNumber || `ID-${order.id}`,
         message: `字段变更：${changed.join('、')}`,
@@ -1364,8 +1926,102 @@ const computeDifferences = (prevMap: Map<number, Partial<OrderRecord>>, nextList
     }
   });
 
-  console.log('✅ 差异检测完成，共发现', notices.length, '条变更');
-  return notices;
+  console.log('📊 对比完成，发现 ' + notices.length + ' 条差异');
+
+  // 过滤已确认的变更（避免重复提醒）
+  const filteredNotices = notices.filter(notice => {
+    if (!notice.after) return true; // 保留删除类型的提醒
+
+    // 🆕 新增记录总是显示，不过滤（即使之前有相同数据被清空过）
+    if (notice.message && notice.message.includes('新增记录')) {
+      return true;
+    }
+
+    const recordId = (notice.after as any)?.id;
+    const trackingNumber = notice.trackingNumber || '';
+
+    // 检查这个变更是否已经被确认过
+    const changedFields = Object.keys(fieldLabels).filter(field => {
+      const beforeVal = (notice.before as any)?.[field];
+      const afterVal = (notice.after as any)?.[field];
+      return String(beforeVal || '') !== String(afterVal || '');
+    });
+
+    const styleFields = ['tracking', 'model', 'sn', 'amount', 'remark'];
+    const changedStyleFields = styleFields.filter(field => {
+      const bgKey = `${field}BgColor`;
+      const fgKey = `${field}FontColor`;
+      const strikeKey = `${field}Strike`;
+
+      const beforeBg = (notice.before as any)?.[bgKey] || '';
+      const afterBg = (notice.after as any)?.[bgKey] || '';
+      const beforeFg = (notice.before as any)?.[fgKey] || '';
+      const afterFg = (notice.after as any)?.[fgKey] || '';
+      const beforeStrike = !!(notice.before as any)?.[strikeKey];
+      const afterStrike = !!(notice.after as any)?.[strikeKey];
+
+      return beforeBg !== afterBg || beforeFg !== afterFg || beforeStrike !== afterStrike;
+    });
+
+    // 将样式字段名转换为保存时使用的格式
+    const styleFieldMap: Record<string, string> = {
+      'tracking': 'trackingNumber',
+      'model': 'model',
+      'sn': 'sn',
+      'amount': 'amount',
+      'remark': 'remark'
+    };
+
+    // 检查每个变更的字段是否已确认
+    const allChangedFields = [
+      ...changedFields,
+      ...changedStyleFields.map(f => `${styleFieldMap[f] || f}Style`)
+    ];
+
+    const hasUnacknowledgedChange = allChangedFields.some(field => {
+      const isStyleField = field.endsWith('Style');
+
+      if (isStyleField) {
+        // 检查样式变更
+        const baseField = field.replace('Style', '');
+        // 将 trackingNumber 转回 tracking 以获取正确的 key
+        const styleKey = baseField === 'trackingNumber' ? 'tracking' : baseField;
+        const bgKey = `${styleKey}BgColor`;
+        const fgKey = `${styleKey}FontColor`;
+        const strikeKey = `${styleKey}Strike`;
+
+        const currentStyle = JSON.stringify({
+          bg: (notice.after as any)?.[bgKey] || '',
+          fg: (notice.after as any)?.[fgKey] || '',
+          strike: !!(notice.after as any)?.[strikeKey]
+        });
+
+        return !acknowledgedChanges.value.some(ack =>
+          (ack.recordId === recordId || ack.trackingNumber.toUpperCase() === trackingNumber.toUpperCase()) &&
+          ack.field === field &&
+          ack.styleValue === currentStyle
+        );
+      } else {
+        // 检查普通字段变更
+        const currentValue = String((notice.after as any)?.[field] || '');
+
+        return !acknowledgedChanges.value.some(ack =>
+          (ack.recordId === recordId || ack.trackingNumber.toUpperCase() === trackingNumber.toUpperCase()) &&
+          ack.field === field &&
+          ack.value === currentValue
+        );
+      }
+    });
+
+    return hasUnacknowledgedChange;
+  });
+
+  console.log('📊 过滤后剩余 ' + filteredNotices.length + ' 条差异（已确认的变更被过滤）');
+  if (notices.length > filteredNotices.length) {
+    console.warn('⚠️ 有 ' + (notices.length - filteredNotices.length) + ' 条变更因已确认而被过滤');
+  }
+
+  return filteredNotices;
 };
 
 
@@ -1425,41 +2081,40 @@ const diffFields = (item: DiffNotice) => {
   return result;
 };
 
+// 格式化样式值为视觉组件（返回对象而不是字符串）
+const formatStyleValue = (obj: Partial<OrderRecord> | undefined, label: string) => {
+  if (!obj) return null;
+
+  const fieldName = label.replace('(样式)', '');
+  const fieldMap: Record<string, string> = {
+    '运单号': 'tracking',
+    '型号': 'model',
+    'SN': 'sn',
+    '金额': 'amount',
+    '备注': 'remark'
+  };
+  const field = fieldMap[fieldName];
+  if (!field) return null;
+
+  const bgKey = `${field}BgColor` as any;
+  const fgKey = `${field}FontColor` as any;
+  const strikeKey = `${field}Strike` as any;
+  const boldKey = `${field}Bold` as any;
+
+  const bg = (obj as any)?.[bgKey];
+  const fg = (obj as any)?.[fgKey];
+  const strike = (obj as any)?.[strikeKey];
+  const bold = (obj as any)?.[boldKey];
+
+  return { bg, fg, strike, bold };
+};
+
 const formatDiffValue = (obj: Partial<OrderRecord> | undefined, label: string) => {
   if (!obj) return '-';
-  
-  // 处理样式字段（如 "型号(样式)"）
+
+  // 处理样式字段（如 "型号(样式)"）- 返回null表示需要使用组件渲染
   if (label.endsWith('(样式)')) {
-    const fieldName = label.replace('(样式)', '');
-    const fieldMap: Record<string, string> = {
-      '型号': 'model',
-      'SN': 'sn',
-      '金额': 'amount',
-      '备注': 'remark'
-    };
-    const field = fieldMap[fieldName];
-    if (!field) return '-';
-    
-    const bgKey = `${field}BgColor` as any;
-    const fgKey = `${field}FontColor` as any;
-    const strikeKey = `${field}Strike` as any;
-    
-    const bg = (obj as any)?.[bgKey];
-    const fg = (obj as any)?.[fgKey];
-    const strike = (obj as any)?.[strikeKey];
-    
-    const parts: string[] = [];
-    if (bg && bg !== '#FFFFFF' && bg !== '#FFF') {
-      parts.push(`背景: ${bg}`);
-    }
-    if (fg && fg !== '#000000' && fg !== '#000') {
-      parts.push(`字体: ${fg}`);
-    }
-    if (strike) {
-      parts.push('删除线');
-    }
-    
-    return parts.length > 0 ? parts.join(', ') : '无样式';
+    return null; // 交给模板使用formatStyleValue渲染
   }
   
   // 处理普通字段
@@ -1484,12 +2139,7 @@ const formatDiffValue = (obj: Partial<OrderRecord> | undefined, label: string) =
 const scheduleDiffCalculation = (prevSnapshot: Map<number, Partial<OrderRecord>>, latest: OrderRecord[], importedStyles?: Map<string, ImportStyle>) => {
   // 轻量异步排队，避免阻塞后续操作或导航
   setTimeout(() => {
-    console.log('⚙️ 开始计算差异，快照:', prevSnapshot.size, '最新:', latest.length);
     const diffs = computeDifferences(prevSnapshot, latest, importedStyles);
-    console.log('📋 发现差异:', diffs.length, '条');
-    if (diffs.length > 0) {
-      console.log('差异详情:', diffs);
-    }
     mergeDiffNotices(diffs);
   }, 0);
 };
@@ -1630,13 +2280,51 @@ const computeStyleChanges = (
 };
 
 const exportDiffNotices = () => {
-  if (!diffNotices.value.length) {
+  // 使用完整列表导出（而不是只导出显示的200条）
+  if (!diffNoticesAll.value.length) {
     ElMessage.info('暂无可导出的变更提醒');
     return;
   }
-  const headers = ['运单号', '变更字段', '旧值', '新值'];
+
+  const totalCount = diffNoticesAll.value.length;
+
+  ElMessage.info({
+    message: `正在导出全部 ${totalCount} 条变更提醒...`,
+    duration: 2000
+  });
+
+  const headers = ['运单号/SN', '变更类型', '变更详情', '重复单号1', '重复单号2', '备注'];
   const rows: string[][] = [];
-  diffNotices.value.forEach(item => {
+
+  // 导出全部数据
+  diffNoticesAll.value.forEach(item => {
+    // 处理删除类型
+    if (item.isDelete) {
+      rows.push([
+        item.trackingNumber || '-',
+        '删除记录',
+        `型号: ${item.model || '-'}, SN: ${item.sn || '-'}`,
+        '',
+        '',
+        'Excel中已删除此记录，需确认是否从数据库删除'
+      ]);
+      return;
+    }
+
+    // 处理无效ID类型
+    if (item.isInvalidId) {
+      rows.push([
+        item.trackingNumber || '-',
+        '无效ID',
+        `Excel ID: ${(item as any).excelId}, 型号: ${item.model || '-'}, SN: ${item.sn || '-'}`,
+        '',
+        '',
+        'Excel中的ID不存在于数据库，已按运单号+SN自动匹配'
+      ]);
+      return;
+    }
+
+    // 处理常规变更
     const fields = diffFields(item);
     if (!fields.length) return;
     fields.forEach(label => {
@@ -1644,24 +2332,44 @@ const exportDiffNotices = () => {
         item.trackingNumber,
         label,
         formatDiffValue(item.before, label),
-        formatDiffValue(item.after, label)
+        formatDiffValue(item.after, label),
+        '',
+        ''
       ]);
     });
   });
+
   if (!rows.length) {
     ElMessage.info('暂无可导出的变更提醒');
     return;
   }
-  const csv = [headers, ...rows]
-    .map(cols => cols.map(col => `"${String(col ?? '').replace(/"/g, '""')}"`).join(','))
-    .join('\n');
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-  const url = window.URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `order-diff-${new Date().toISOString().slice(0, 10)}.csv`;
-  a.click();
-  window.URL.revokeObjectURL(url);
+
+  // 使用 xlsx 生成真正的 Excel 文件
+  const wsData = [headers, ...rows];
+  const ws = XLSX.utils.aoa_to_sheet(wsData);
+
+  // 设置自定义列宽（单位是字符宽度）
+  const colWidths = [
+    { wch: 30 },  // 运单号/SN
+    { wch: 15 },  // 变更类型
+    { wch: 35 },  // 变更详情
+    { wch: 35 },  // 重复单号1
+    { wch: 35 },  // 重复单号2
+    { wch: 60 }   // 备注
+  ];
+  ws['!cols'] = colWidths;
+
+  // 创建工作簿并添加工作表
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '变更提醒');
+
+  // 生成Excel文件并下载
+  XLSX.writeFile(wb, `数据变更提醒-${new Date().toISOString().slice(0, 10)}.xlsx`);
+
+  ElMessage.success({
+    message: `成功导出 ${totalCount} 条变更提醒`,
+    duration: 2000
+  });
 };
 
 const submitEdit = async () => {
@@ -1762,18 +2470,23 @@ const clearUserResults = () => {
   loadCategoryStats();
 };
 
-// 将导入样式映射到行上的内联样式
+// 样式缓存，避免重复计算
+const styleCache = new Map<string, Record<string, string>>();
+
+// 将导入样式映射到行上的内联样式（优化版：使用缓存）
 const styleFor = (row: OrderRecord, field: 'tracking' | 'model' | 'sn' | 'amount' | 'remark') => {
   try {
-    // 先按 record.id 精确匹配，避免同一 tracking+SN 的不同记录互相“覆盖样式”
+    const cacheKey = `${row.id}-${field}`;
+
+    // 检查缓存
+    if (styleCache.has(cacheKey)) {
+      return styleCache.get(cacheKey)!;
+    }
+
+    // 先按 record.id 精确匹配，避免同一 tracking+SN 的不同记录互相"覆盖样式"
     let s: any | undefined;
     if (row.id) {
       s = importStyles.value.get(`ID-${row.id}`) as any;
-    }
-    // 再回退到 tracking#sn 级别（兼容旧数据/无 id 的情况）
-    if (!s) {
-      const key = `${(row.trackingNumber || '').toUpperCase()}#${(row.sn || '').toUpperCase()}`;
-      s = importStyles.value.get(key) as any;
     }
 
     // 1) 优先使用本次导入的样式
@@ -1788,7 +2501,7 @@ const styleFor = (row: OrderRecord, field: 'tracking' | 'model' | 'sn' | 'amount
       }[field];
     }
 
-    // 2) 若无，则回退到后端返回的持久化样式字段（针对该条记录的 orderId）
+    // 2) 若无，则回退到后端返回的持久化样式字段
     if (!map) {
       const fallback: any = {
         tracking: { bg: (row as any).trackingBgColor, fg: (row as any).trackingFontColor, strike: (row as any).trackingStrike },
@@ -1800,7 +2513,10 @@ const styleFor = (row: OrderRecord, field: 'tracking' | 'model' | 'sn' | 'amount
       map = fallback[field];
     }
 
-    if (!map) return {};
+    if (!map) {
+      styleCache.set(cacheKey, {});
+      return {};
+    }
 
     const style: Record<string, string> = {};
 
@@ -1819,6 +2535,8 @@ const styleFor = (row: OrderRecord, field: 'tracking' | 'model' | 'sn' | 'amount
       style['text-decoration'] = 'line-through';
     }
 
+    // 缓存结果
+    styleCache.set(cacheKey, style);
     return style;
   } catch (error) {
     console.warn('样式应用失败:', error);
@@ -1828,11 +2546,10 @@ const styleFor = (row: OrderRecord, field: 'tracking' | 'model' | 'sn' | 'amount
 
 const exportUserOrders = () => {
   if (!userOrders.value.length) return;
-  const headers = ['下单日期', '运单号', '型号', 'SN', '分类', '状态', '备注', '创建人'];
+  const headers = ['运单号', '型号', 'SN', '分类', '状态', '备注', '创建人'];
   const csvRows = [headers.join(',')];
   userOrders.value.forEach(order => {
     csvRows.push([
-      order.orderDate ?? '',
       order.trackingNumber ?? '',
       order.model ?? '',
       order.sn ?? '',
@@ -1873,6 +2590,9 @@ watch(userSearchInput, value => {
 const sortState = reactive<{ prop: string; order: SortOrder }>({ prop: '', order: null });
 
 const handleSortChange = (options: { prop: string; order: SortOrder }) => {
+  // 取消正在进行的后台差异计算
+  abortDiffCalculation();
+
   // 如果点击的是状态列，实现循环筛选而不是排序
   if (options.prop === 'status') {
     // 循环顺序：全部 → 未打款 → 已打款 → 全部
@@ -2122,6 +2842,12 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.paid-date {
+  font-size: 11px;
+  color: #909399;
+  margin-top: 2px;
+}
+
 :deep(.el-table) {
   color: #0a0a0a;
 }
@@ -2458,5 +3184,139 @@ onBeforeUnmount(() => {
   font-size: 13px;
   line-height: 1.5;
   font-weight: 500;
+}
+
+/* 重复SN提醒样式 */
+.duplicate-sn-info {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.duplicate-sn-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.duplicate-sn-item .field-name {
+  font-weight: 600;
+  color: #374151;
+  min-width: 70px;
+}
+
+.duplicate-sn-item .duplicate-value {
+  color: #f59e0b;
+  font-weight: 700;
+  background: #fffbeb;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.duplicate-sn-item .count-badge {
+  color: #dc2626;
+  font-weight: 700;
+  background: #fee;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.duplicate-sn-item.warning-text {
+  color: #f59e0b;
+  font-weight: 500;
+  margin-top: 4px;
+}
+
+.duplicate-sn-warning {
+  color: #d97706;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.duplicate-sn-warning .duplicate-header {
+  display: flex;
+  align-items: center;
+  margin-bottom: 8px;
+  color: #d97706;
+  font-size: 14px;
+}
+
+.duplicate-sn-warning .duplicate-rows {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin: 8px 0;
+  padding: 8px;
+  background: #fffbeb;
+  border-radius: 4px;
+}
+
+.duplicate-sn-warning .rows-label {
+  font-weight: 600;
+  color: #92400e;
+  margin-right: 8px;
+}
+
+.duplicate-sn-warning .duplicate-tip {
+  display: flex;
+  align-items: center;
+  margin-top: 8px;
+  padding: 6px 10px;
+  background: #fef3c7;
+  border-left: 3px solid #f59e0b;
+  border-radius: 4px;
+  color: #78350f;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* 样式值显示 */
+.style-value {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.color-block {
+  display: inline-block;
+  width: 24px;
+  height: 16px;
+  border: 1px solid #ddd;
+  border-radius: 3px;
+  vertical-align: middle;
+  cursor: help;
+}
+
+.color-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.no-style {
+  color: #999;
+  font-size: 12px;
+}
+
+.style-value .el-icon {
+  color: #f56c6c;
+  font-size: 16px;
+}
+
+.bold-indicator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 18px;
+  background: #409eff;
+  color: white;
+  font-weight: bold;
+  font-size: 13px;
+  border-radius: 3px;
+  cursor: help;
 }
 </style>

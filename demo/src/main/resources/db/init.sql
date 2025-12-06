@@ -43,6 +43,7 @@
                                   remark          VARCHAR(255),
                                   category        VARCHAR(64),
                                   status          VARCHAR(32),
+                                  paid_at         DATETIME        COMMENT '打款时间',
                                   amount          DECIMAL(15,2),
                                   currency        VARCHAR(16),
                                   weight          DECIMAL(10,2),
@@ -61,21 +62,6 @@
                                   INDEX idx_order_tracking(tracking_number), -- 运单号查询索引
                                   FULLTEXT KEY ft_order_keyword (tracking_number, sn, model) -- 全文索引用于关键字搜索
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
-#     -- 订单单元格样式表（持久化导入时的B~F列样式）
-#     CREATE TABLE IF NOT EXISTS order_cell_style (
-#         id           BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
-#         order_id     BIGINT UNSIGNED NOT NULL,
-#         field        VARCHAR(16)     NOT NULL, -- tracking|model|sn|amount|remark
-#         bg_color     VARCHAR(16),
-#         font_color   VARCHAR(16),
-#         strike       TINYINT         NOT NULL DEFAULT 0,
-#         created_at   DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
-#         updated_at   DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-#         INDEX idx_style_order(order_id),
-#         UNIQUE KEY uk_style_order_field(order_id, field),
-#         CONSTRAINT fk_style_order FOREIGN KEY (order_id) REFERENCES order_record(id) ON DELETE CASCADE
-#     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     CREATE TABLE IF NOT EXISTS order_cell_style (
                                                     id           BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
                                                     order_id     BIGINT UNSIGNED NULL,     -- 允许为空，避免外键错误
@@ -83,13 +69,14 @@
                                                     bg_color     VARCHAR(16),
                                                     font_color   VARCHAR(16),
                                                     strike       TINYINT         NOT NULL DEFAULT 0,
+                                                    bold         TINYINT         NOT NULL DEFAULT 0 COMMENT '是否加粗',  -- ⭐ 已包含细体/加粗
                                                     created_at   DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
                                                     updated_at   DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                                                     INDEX idx_style_order(order_id),
                                                     UNIQUE KEY uk_style_order_field(order_id, field),
                                                     CONSTRAINT fk_style_order FOREIGN KEY (order_id)
                                                         REFERENCES order_record(id)
-                                                        ON DELETE SET NULL       -- 删除订单时只把样式置空，不报错
+                                                        ON DELETE SET NULL
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     -- 用户提交单号表
     CREATE TABLE user_submission (
@@ -104,7 +91,7 @@
                                      created_at       DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
                                      updated_at       DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                                      deleted          TINYINT         NOT NULL DEFAULT 0,
-                                     UNIQUE KEY uk_submission_tracking(tracking_number),
+                                     UNIQUE KEY uk_submission_tracking_active(tracking_number, deleted),
                                      INDEX idx_submission_status(status),
                                      INDEX idx_submission_date(submission_date),
                                      INDEX idx_submission_owner(owner_username),
@@ -147,7 +134,6 @@
                                        status          VARCHAR(32),
                                        warning         TINYINT         NOT NULL DEFAULT 0,
                                        settle_batch    VARCHAR(64),
-                                       payable_at      DATE,
                                        remark          VARCHAR(255),
                                        confirmed_by    VARCHAR(64),
                                        confirmed_at    DATETIME,

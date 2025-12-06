@@ -148,10 +148,12 @@ public class UserSubmissionServiceImpl implements UserSubmissionService {
         if (!StringUtils.hasText(trackingNumber)) {
             return;
         }
+        // 查询所有匹配的订单(包括UNPAID状态的)
         List<OrderRecord> orders = orderService.findByTracking(List.of(trackingNumber));
         if (orders.isEmpty()) {
             return;
         }
+        // 创建待结账记录
         settlementService.createPending(orders, true);
     }
 
@@ -291,7 +293,16 @@ public class UserSubmissionServiceImpl implements UserSubmissionService {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "提交人不能为空");
         }
         String normalized = trackingNumber.trim();
-        ensureNotSubmitted(normalized);
+
+        // Check if tracking number contains Chinese characters
+        // Chinese tracking numbers (like "七月", "跑腿") can be submitted multiple times
+        // English/numeric tracking numbers still maintain uniqueness
+        boolean containsChinese = normalized.matches(".*[\u4e00-\u9fa5]+.*");
+
+        // Only check for duplicates if NOT Chinese tracking number
+        if (!containsChinese) {
+            ensureNotSubmitted(normalized);
+        }
 
         // 将归属关系存入 JSON 文件
         trackingOwnerService.setOwner(normalized, ownerUsername.trim());

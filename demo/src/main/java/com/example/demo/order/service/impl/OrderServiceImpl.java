@@ -99,8 +99,14 @@ public class OrderServiceImpl implements OrderService {
         private String bg;
         private String font;
         private Boolean strike;
+        private Boolean bold;
         CellStyleSnap() {}
-        CellStyleSnap(String bg, String font, Boolean strike) { this.bg = bg; this.font = font; this.strike = strike; }
+        CellStyleSnap(String bg, String font, Boolean strike, Boolean bold) {
+            this.bg = bg;
+            this.font = font;
+            this.strike = strike;
+            this.bold = bold;
+        }
     }
 
     private String styleKey(OrderRecord r) {
@@ -110,11 +116,11 @@ public class OrderServiceImpl implements OrderService {
 
     private Map<String, CellStyleSnap> buildStyleMap(OrderRecord r) {
         Map<String, CellStyleSnap> m = new HashMap<>();
-        m.put("tracking", new CellStyleSnap(norm(r.getTrackingBgColor()), norm(r.getTrackingFontColor()), bool(r.getTrackingStrike())));
-        m.put("model",    new CellStyleSnap(norm(r.getModelBgColor()),    norm(r.getModelFontColor()),    bool(r.getModelStrike())));
-        m.put("sn",       new CellStyleSnap(norm(r.getSnBgColor()),       norm(r.getSnFontColor()),       bool(r.getSnStrike())));
-        m.put("remark",   new CellStyleSnap(norm(r.getRemarkBgColor()),   norm(r.getRemarkFontColor()),   bool(r.getRemarkStrike())));
-        m.put("amount",   new CellStyleSnap(norm(r.getAmountBgColor()),   norm(r.getAmountFontColor()),   bool(r.getAmountStrike())));
+        m.put("tracking", new CellStyleSnap(norm(r.getTrackingBgColor()), norm(r.getTrackingFontColor()), bool(r.getTrackingStrike()), bool(r.getTrackingBold())));
+        m.put("model",    new CellStyleSnap(norm(r.getModelBgColor()),    norm(r.getModelFontColor()),    bool(r.getModelStrike()),    bool(r.getModelBold())));
+        m.put("sn",       new CellStyleSnap(norm(r.getSnBgColor()),       norm(r.getSnFontColor()),       bool(r.getSnStrike()),       bool(r.getSnBold())));
+        m.put("remark",   new CellStyleSnap(norm(r.getRemarkBgColor()),   norm(r.getRemarkFontColor()),   bool(r.getRemarkStrike()),   bool(r.getRemarkBold())));
+        m.put("amount",   new CellStyleSnap(norm(r.getAmountBgColor()),   norm(r.getAmountFontColor()),   bool(r.getAmountStrike()),   bool(r.getAmountBold())));
         return m;
     }
 
@@ -133,35 +139,40 @@ public class OrderServiceImpl implements OrderService {
         m.put("tracking", new CellStyleSnap(
                 trackingStyle != null ? norm(trackingStyle.getBgColor()) : norm(null),
                 trackingStyle != null ? norm(trackingStyle.getFontColor()) : norm(null),
-                trackingStyle != null ? bool(trackingStyle.getStrike()) : Boolean.FALSE
+                trackingStyle != null ? bool(trackingStyle.getStrike()) : Boolean.FALSE,
+                trackingStyle != null ? bool(trackingStyle.getBold()) : Boolean.FALSE
         ));
 
         OrderCellStyle modelStyle = styleMap.get("model");
         m.put("model", new CellStyleSnap(
                 modelStyle != null ? norm(modelStyle.getBgColor()) : norm(null),
                 modelStyle != null ? norm(modelStyle.getFontColor()) : norm(null),
-                modelStyle != null ? bool(modelStyle.getStrike()) : Boolean.FALSE
+                modelStyle != null ? bool(modelStyle.getStrike()) : Boolean.FALSE,
+                modelStyle != null ? bool(modelStyle.getBold()) : Boolean.FALSE
         ));
 
         OrderCellStyle snStyle = styleMap.get("sn");
         m.put("sn", new CellStyleSnap(
                 snStyle != null ? norm(snStyle.getBgColor()) : norm(null),
                 snStyle != null ? norm(snStyle.getFontColor()) : norm(null),
-                snStyle != null ? bool(snStyle.getStrike()) : Boolean.FALSE
+                snStyle != null ? bool(snStyle.getStrike()) : Boolean.FALSE,
+                snStyle != null ? bool(snStyle.getBold()) : Boolean.FALSE
         ));
 
         OrderCellStyle remarkStyle = styleMap.get("remark");
         m.put("remark", new CellStyleSnap(
                 remarkStyle != null ? norm(remarkStyle.getBgColor()) : norm(null),
                 remarkStyle != null ? norm(remarkStyle.getFontColor()) : norm(null),
-                remarkStyle != null ? bool(remarkStyle.getStrike()) : Boolean.FALSE
+                remarkStyle != null ? bool(remarkStyle.getStrike()) : Boolean.FALSE,
+                remarkStyle != null ? bool(remarkStyle.getBold()) : Boolean.FALSE
         ));
 
         OrderCellStyle amountStyle = styleMap.get("amount");
         m.put("amount", new CellStyleSnap(
                 amountStyle != null ? norm(amountStyle.getBgColor()) : norm(null),
                 amountStyle != null ? norm(amountStyle.getFontColor()) : norm(null),
-                amountStyle != null ? bool(amountStyle.getStrike()) : Boolean.FALSE
+                amountStyle != null ? bool(amountStyle.getStrike()) : Boolean.FALSE,
+                amountStyle != null ? bool(amountStyle.getBold()) : Boolean.FALSE
         ));
 
         return m;
@@ -320,7 +331,8 @@ public class OrderServiceImpl implements OrderService {
                 CellStyleSnap b = curStyle.get(f);
                 boolean styleChanged = !Objects.equals(a == null ? null : a.getBg(),   b == null ? null : b.getBg())
                         || !Objects.equals(a == null ? null : a.getFont(), b == null ? null : b.getFont())
-                        || !Objects.equals(a == null ? Boolean.FALSE : a.getStrike(), b == null ? Boolean.FALSE : b.getStrike());
+                        || !Objects.equals(a == null ? Boolean.FALSE : a.getStrike(), b == null ? Boolean.FALSE : b.getStrike())
+                        || !Objects.equals(a == null ? Boolean.FALSE : a.getBold(), b == null ? Boolean.FALSE : b.getBold());
                 String va = prevValue.get(f);
                 String vb = curValue.get(f);
                 boolean valueChanged = !Objects.equals(va, vb);
@@ -333,53 +345,35 @@ public class OrderServiceImpl implements OrderService {
         return changed;
     }
 
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(OrderServiceImpl.class);
+
     private boolean isChangedAndUpdateBaseline(OrderRecord r, String operator) {
         Snapshot s = snaps(operator);
-        // 1. 优先使用ID匹配记录（如果Excel中包含ID）
+        // 通过 时间+物流单号+SN 匹配数据库记录
         OrderRecord dbLatest = null;
         List<OrderCellStyle> dbStyles = null;
 
-        if (r.getId() != null && r.getId() > 0) {
-            // Excel中有ID，直接按ID查询
-            dbLatest = orderRecordMapper.selectById(r.getId());
-            if (dbLatest != null) {
-                // 查询该记录的样式
-                dbStyles = orderCellStyleMapper.selectList(
-                        new QueryWrapper<OrderCellStyle>().lambda()
-                                .eq(OrderCellStyle::getOrderId, dbLatest.getId())
-                );
-            } else {
-                // Excel中有ID但数据库中不存在（ID已被删除或写错）
-                Long invalidId = r.getId();
-                System.out.println("警告: Excel中的ID=" + invalidId + " 在数据库中不存在（可能已被删除或写错），将清空ID并按运单号+SN匹配");
-                // 标记无效ID，稍后返回给前端
-                r.setId(null);  // 清空ID，继续按运单号+SN匹配
-                // 注意：这里只是标记，实际的 invalidId 记录会在外层循环中添加
-            }
-        }
+        log.info("🔍 检测变更开始: tracking={}, sn={}, remark={}, model={}",
+                r.getTrackingNumber(), r.getSn(), r.getRemark(), r.getModel());
+        log.info("🔍 Excel样式原始值: trackingBg={}, modelBg={}, snBg={}, remarkBg={}, amountBg={}",
+                r.getTrackingBgColor(), r.getModelBgColor(), r.getSnBgColor(), r.getRemarkBgColor(), r.getAmountBgColor());
 
-        if (dbLatest == null && (StringUtils.hasText(r.getTrackingNumber()) || StringUtils.hasText(r.getSn()))) {
-            // 没有ID，回退到原来的逻辑：按运单号+SN匹配
+        // 如果 SN 或物流单号包含中文，不做匹配，直接作为新记录插入
+        boolean containsChinese = containsChinese(r.getSn()) || containsChinese(r.getTrackingNumber());
+        log.info("🔍 包含中文: {}", containsChinese);
+
+        if (!containsChinese && StringUtils.hasText(r.getSn()) && StringUtils.hasText(r.getTrackingNumber())) {
             LambdaQueryWrapper<OrderRecord> wrapper = new LambdaQueryWrapper<>();
-
-            // 构建查询条件：运单号和SN都要匹配（包括 null 的情况）
-            if (StringUtils.hasText(r.getTrackingNumber())) {
-                wrapper.eq(OrderRecord::getTrackingNumber, r.getTrackingNumber());
-            } else {
-                wrapper.isNull(OrderRecord::getTrackingNumber);
-            }
-
-            if (StringUtils.hasText(r.getSn())) {
-                wrapper.eq(OrderRecord::getSn, r.getSn());
-            } else {
-                wrapper.isNull(OrderRecord::getSn);
-            }
-
-            wrapper.orderByDesc(OrderRecord::getId).last("LIMIT 1");
+            wrapper.eq(OrderRecord::getSn, r.getSn().trim())
+                   .eq(OrderRecord::getTrackingNumber, r.getTrackingNumber().trim());
+            // 不再使用 orderTime 作为匹配条件，因为 Excel 导入的时间格式可能不一致
+            // tracking_number + sn 组合已足够唯一标识记录
+            wrapper.orderByDesc(OrderRecord::getCreatedAt)
+                   .last("LIMIT 1");
             dbLatest = orderRecordMapper.selectOne(wrapper);
-
             if (dbLatest != null) {
-                // 查询该记录的样式
+                // 找到匹配的记录，使用数据库的ID
+                r.setId(dbLatest.getId());
                 dbStyles = orderCellStyleMapper.selectList(
                         new QueryWrapper<OrderCellStyle>().lambda()
                                 .eq(OrderCellStyle::getOrderId, dbLatest.getId())
@@ -389,6 +383,17 @@ public class OrderServiceImpl implements OrderService {
 
         // 2. 如果数据库中存在记录，进行比较
         if (dbLatest != null) {
+            log.info("🔍 找到数据库记录: id={}, tracking={}, sn={}, remark={}",
+                    dbLatest.getId(), dbLatest.getTrackingNumber(), dbLatest.getSn(), dbLatest.getRemark());
+            // 输出数据库中存储的样式
+            if (dbStyles != null && !dbStyles.isEmpty()) {
+                for (OrderCellStyle style : dbStyles) {
+                    log.info("🔍 数据库样式[{}]: bg={}, font={}, strike={}, bold={}",
+                            style.getField(), style.getBgColor(), style.getFontColor(), style.getStrike(), style.getBold());
+                }
+            } else {
+                log.info("🔍 数据库中无样式记录");
+            }
             Map<String, CellStyleSnap> curStyle = buildStyleMap(r);
             Map<String, String> curValue = buildValueMap(r);
 
@@ -398,29 +403,45 @@ public class OrderServiceImpl implements OrderService {
 
             List<String> order = Arrays.asList("tracking","model","sn","remark","amount");
             boolean changed = false;
+            String changedField = null;
 
             for (String f : order) {
                 CellStyleSnap a = dbStyleMap.get(f);
                 CellStyleSnap b = curStyle.get(f);
                 boolean styleChanged = !Objects.equals(a == null ? null : a.getBg(),   b == null ? null : b.getBg())
                         || !Objects.equals(a == null ? null : a.getFont(), b == null ? null : b.getFont())
-                        || !Objects.equals(a == null ? Boolean.FALSE : a.getStrike(), b == null ? Boolean.FALSE : b.getStrike());
+                        || !Objects.equals(a == null ? Boolean.FALSE : a.getStrike(), b == null ? Boolean.FALSE : b.getStrike())
+                        || !Objects.equals(a == null ? Boolean.FALSE : a.getBold(), b == null ? Boolean.FALSE : b.getBold());
                 String va = dbValueMap.get(f);
                 String vb = curValue.get(f);
                 boolean valueChanged = !Objects.equals(va, vb);
                 if (styleChanged || valueChanged) {
                     changed = true;
+                    changedField = f;
+                    log.info("🔍 字段 {} 发生变化: 值[{} -> {}], 样式bg[{} -> {}], 样式font[{} -> {}]",
+                            f, va, vb,
+                            a == null ? null : a.getBg(), b == null ? null : b.getBg(),
+                            a == null ? null : a.getFont(), b == null ? null : b.getFont());
                     break;
                 }
             }
 
-            // 如果通过ID匹配到了记录，保存匹配到的记录ID（用于后续更新而不是插入）
-            if (r.getId() != null && r.getId().equals(dbLatest.getId())) {
-                // Excel中的ID与数据库匹配，标记为需要更新
-                r.setId(dbLatest.getId());
-            } else if (r.getId() == null) {
-                // Excel中没有ID，但通过运单号+SN匹配到了，也应该更新而不是插入
-                r.setId(dbLatest.getId());
+            if (!changed) {
+                // 详细日志：显示所有字段的比较值
+                log.info("🔍 与数据库比较: 无变化。详细比较:");
+                for (String f : order) {
+                    CellStyleSnap a = dbStyleMap.get(f);
+                    CellStyleSnap b = curStyle.get(f);
+                    String va = dbValueMap.get(f);
+                    String vb = curValue.get(f);
+                    log.info("  字段[{}]: 值[db={}, excel={}], bg[db={}, excel={}], font[db={}, excel={}], strike[db={}, excel={}]",
+                            f, va, vb,
+                            a == null ? null : a.getBg(), b == null ? null : b.getBg(),
+                            a == null ? null : a.getFont(), b == null ? null : b.getFont(),
+                            a == null ? Boolean.FALSE : a.getStrike(), b == null ? Boolean.FALSE : b.getStrike());
+                }
+            } else {
+                log.info("🔍 与数据库比较: 检测到变化, 字段={}", changedField);
             }
 
             // 仍然更新内存快照（用于会话内的快速比较）
@@ -439,6 +460,7 @@ public class OrderServiceImpl implements OrderService {
         }
 
         // 3. 数据库中不存在，视为首次出现，返回 true（有变化）
+        log.info("🔍 数据库中未找到匹配记录，视为新记录: tracking={}, sn={}", r.getTrackingNumber(), r.getSn());
         String key = styleKey(r);
         Map<String, CellStyleSnap> curStyle = buildStyleMap(r);
         Map<String, String> curValue = buildValueMap(r);
@@ -469,40 +491,51 @@ public class OrderServiceImpl implements OrderService {
     public Map<String, Object> importOrders(MultipartFile file, String operator) {
         try {
             List<OrderRecord> records = ExcelHelper.readOrders(file.getInputStream(), operator);
-            Map<String, List<String>> duplicateSnInFile = findDuplicateSnInList(records);
             List<OrderRecord> needSettlement = new ArrayList<>();
-            // 收集样式变更
 
-            // 检测Excel中删除的记录（数据库有但Excel没有）
-            List<OrderRecord> deletedRecords = detectDeletedRecords(records);
+            // === 预加载数据库记录，用于顺序匹配 ===
+            // 收集所有物流单号
+            Set<String> allTrackingNumbers = records.stream()
+                    .map(OrderRecord::getTrackingNumber)
+                    .filter(StringUtils::hasText)
+                    .map(String::trim)
+                    .collect(Collectors.toSet());
 
-            // 检测无效ID（Excel中有ID但数据库中不存在）
-            List<Map<String, Object>> invalidIds = new ArrayList<>();
+            // 预加载数据库中相关记录
+            Map<String, List<OrderRecord>> dbRecordsByKey = new HashMap<>();
+            Map<String, Integer> matchCounterByKey = new HashMap<>();  // 每个key已匹配的计数
+            if (!allTrackingNumbers.isEmpty()) {
+                LambdaQueryWrapper<OrderRecord> preloadWrapper = new LambdaQueryWrapper<>();
+                preloadWrapper.in(OrderRecord::getTrackingNumber, allTrackingNumbers)
+                        .orderByAsc(OrderRecord::getId);  // 按ID升序，保证顺序稳定
+                List<OrderRecord> dbRecords = orderRecordMapper.selectList(preloadWrapper);
+                // 按 tracking_number + sn + model 分组
+                for (OrderRecord db : dbRecords) {
+                    String key = buildMatchKey(db.getTrackingNumber(), db.getSn(), db.getModel());
+                    dbRecordsByKey.computeIfAbsent(key, k -> new ArrayList<>()).add(db);
+                }
+            }
 
-            int skippedUnchanged = 0;
-            List<Integer> skippedRows = new ArrayList<>();
-            List<OrderRecord> changedRecords = new ArrayList<>();
+            // 通过SN+物流单号+Model匹配数据库记录，设置ID（用于后续更新而非插入），同时进行变更检测
+            // 注意：isChangedAndUpdateBaseline 会更新基线，所以只能调用一次
+            Map<OrderRecord, Boolean> changeResults = new HashMap<>();
             for (OrderRecord record : records) {
                 record.setImported(Boolean.TRUE);
                 if (record.getTrackingNumber() != null) {
                     record.setCategory(TrackingCategoryUtil.resolve(record.getTrackingNumber()));
                 }
-                // 变更检测（优先使用ID对齐，次选"运单号+SN"对齐；未命中再按行号以及 tracking 兜底）
-                // 内容/格式/颜色 任一变化才写库；首次见到视为变化
-                Long originalId = record.getId(); // 保存原始ID（如果有）
-                boolean changed = isChangedAndUpdateBaseline(record, operator);
+                // 调用变更检测,这会通过顺序匹配设置record的ID，并返回是否变化
+                boolean changed = isChangedAndUpdateBaselineWithPreload(record, operator, dbRecordsByKey, matchCounterByKey);
+                changeResults.put(record, changed);
+            }
 
-                // 检测无效ID：Excel中有ID但在isChangedAndUpdateBaseline中被清空了
-                if (originalId != null && originalId > 0 && record.getId() == null) {
-                    // ID被清空了，说明原ID在数据库中不存在
-                    Map<String, Object> invalidIdInfo = new HashMap<>();
-                    invalidIdInfo.put("excelId", originalId);
-                    invalidIdInfo.put("trackingNumber", record.getTrackingNumber());
-                    invalidIdInfo.put("model", record.getModel());
-                    invalidIdInfo.put("sn", record.getSn());
-                    invalidIdInfo.put("excelRowIndex", record.getExcelRowIndex());
-                    invalidIds.add(invalidIdInfo);
-                }
+            int skippedUnchanged = 0;
+            List<Integer> skippedRows = new ArrayList<>();
+            List<OrderRecord> changedRecords = new ArrayList<>();
+            for (OrderRecord record : records) {
+                // 使用之前记录的变更检测结果（不再重复调用）
+                boolean changed = changeResults.getOrDefault(record, true);
+
                 if (!changed) {
                     skippedUnchanged++;
                     if (record.getExcelRowIndex() != null) skippedRows.add(record.getExcelRowIndex());
@@ -529,14 +562,18 @@ public class OrderServiceImpl implements OrderService {
                 settlementService.createPending(needSettlement, true);
             }
             Map<String, Object> report = new HashMap<>();
-            if (!duplicateSnInFile.isEmpty()) {
-                report.put("duplicateSn", duplicateSnInFile.keySet());
-                report.put("duplicateSnDetail", duplicateSnInFile);
-            }
             // 统计信息：跳过未变化的行
             report.put("skippedUnchanged", skippedUnchanged);
             report.put("skippedRows", skippedRows);
             report.put("importedCount", changedRecords.size());
+
+            // 返回变化记录的ID列表（前端只需要对比这些ID）
+            List<Long> changedIds = changedRecords.stream()
+                    .map(OrderRecord::getId)
+                    .filter(Objects::nonNull)
+                    .toList();
+            report.put("changedIds", changedIds);
+
             // 返回样式信息（仅变化的用于即时展示）
             List<Map<String, Object>> styles = changedRecords.stream().map(r -> {
                 Map<String, Object> m = new HashMap<>();
@@ -562,7 +599,8 @@ public class OrderServiceImpl implements OrderService {
             }).toList();
             report.put("styles", styles);
 
-            // 返回待删除的记录列表
+            // 检测删除的记录（数据库有但Excel没有）
+            List<OrderRecord> deletedRecords = detectDeletedRecords(records);
             if (!deletedRecords.isEmpty()) {
                 List<Map<String, Object>> deletedList = deletedRecords.stream().map(r -> {
                     Map<String, Object> m = new HashMap<>();
@@ -578,11 +616,6 @@ public class OrderServiceImpl implements OrderService {
                 report.put("deletedRecords", deletedList);
             }
 
-            // 返回无效ID列表
-            if (!invalidIds.isEmpty()) {
-                report.put("invalidIds", invalidIds);
-            }
-
             return report;
         } catch (IOException e) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "Excel 解析失败");
@@ -594,6 +627,7 @@ public class OrderServiceImpl implements OrderService {
             key = "'page1:' + #request.size + ':' + #request.startDate + ':' + #request.endDate + ':' + #request.category + ':' + #request.status + ':' + #request.keyword + ':' + #request.ownerUsername + ':' + #request.sortBy + ':' + #request.sortOrder",
             condition = "#request.page == 1")
     public IPage<OrderRecord> query(OrderFilterRequest request) {
+        System.out.println("🔍 OrderService.query 收到请求: keyword=" + request.getKeyword());
         Page<OrderRecord> page = Page.of(request.getPage(), request.getSize());
         LambdaQueryWrapper<OrderRecord> wrapper = new LambdaQueryWrapper<>();
 
@@ -612,15 +646,22 @@ public class OrderServiceImpl implements OrderService {
         if (request.getKeyword() != null && !request.getKeyword().isBlank()) {
             String keyword = request.getKeyword().trim();
 
+            // 检测是否包含中文字符
+            boolean hasChinese = keyword.chars().anyMatch(ch -> Character.UnicodeBlock.of(ch) == Character.UnicodeBlock.CJK_UNIFIED_IDEOGRAPHS);
+            System.out.println("🔍 关键字: " + keyword + ", 包含中文: " + hasChinese);
+
             // 检测是否为运单号格式（包含 - 符号）
             // 运单号格式如: JDX045395221407-1-1, SF2034401724303
             // 全文索引会把 - 当作分隔符，导致无法精确匹配，需使用 LIKE
-            if (keyword.contains("-")) {
-                // 对于运单号格式，使用 LIKE 精确查询
+            // 全文索引对中文支持不好，包含中文也使用 LIKE
+            if (keyword.contains("-") || hasChinese) {
+                System.out.println("🔍 使用 LIKE 查询（中文或包含-）");
+                // 对于包含 - 或中文的关键字，使用 LIKE 精确查询
                 wrapper.and(w -> w.like(OrderRecord::getTrackingNumber, keyword)
                         .or().like(OrderRecord::getSn, keyword)
                         .or().like(OrderRecord::getModel, keyword));
             } else {
+                System.out.println("🔍 使用全文索引查询");
                 // 其他关键字使用全文索引进行搜索，性能更高
                 // 在布尔模式下，+ 表示必须包含，* 是通配符
                 String booleanModeKeyword = Arrays.stream(keyword.split("\\s+"))
@@ -723,12 +764,17 @@ public class OrderServiceImpl implements OrderService {
         }
 
         IPage<OrderRecord> result = orderRecordMapper.selectPage(page, wrapper);
+        System.out.println("🔍 查询结果: 共 " + result.getRecords().size() + " 条记录");
+        if (result.getRecords().size() > 0) {
+            System.out.println("🔍 第一条记录: trackingNumber=" + result.getRecords().get(0).getTrackingNumber() + ", sn=" + result.getRecords().get(0).getSn());
+        }
 
         // 关联查询归属用户信息
         attachOwnerInfo(result.getRecords());
         // 回填持久化样式
         attachStyles(result.getRecords());
 
+        System.out.println("🔍 最终返回: 共 " + result.getRecords().size() + " 条记录");
         return result;
     }
 
@@ -786,53 +832,207 @@ public class OrderServiceImpl implements OrderService {
 
     /**
      * 检测Excel中删除的记录（数据库有但Excel没有）
-     * 策略：基于运单号范围检测
-     * - 收集Excel中出现的所有运单号
-     * - 查询数据库中这些运单号的所有记录
-     * - 对比找出数据库有但Excel没有的记录（通过运单号+SN匹配）
+     * 策略：基于 物流单号+SN+Model 组合检测，支持相同key的多条记录
+     * - 收集Excel中所有物流单号
+     * - 查询数据库中这些物流单号的所有记录
+     * - 按 tracking+sn+model 分组计数，找出数据库比Excel多的记录
      */
     private List<OrderRecord> detectDeletedRecords(List<OrderRecord> excelRecords) {
         if (CollectionUtils.isEmpty(excelRecords)) {
             return List.of();
         }
 
-        // 1. 收集Excel中的所有运单号
+        // 1. 收集Excel中所有物流单号
         Set<String> excelTrackingNumbers = excelRecords.stream()
                 .map(OrderRecord::getTrackingNumber)
                 .filter(StringUtils::hasText)
+                .map(String::trim)
                 .collect(Collectors.toSet());
 
         if (excelTrackingNumbers.isEmpty()) {
             return List.of();
         }
 
-        // 2. 查询数据库中这些运单号的所有记录
+        // 2. 按 tracking+sn+model 统计Excel中每个key的数量
+        Map<String, Long> excelCountByKey = excelRecords.stream()
+                .filter(r -> StringUtils.hasText(r.getTrackingNumber()))
+                .collect(Collectors.groupingBy(
+                        r -> buildMatchKey(r.getTrackingNumber(), r.getSn(), r.getModel()),
+                        Collectors.counting()
+                ));
+
+        // 3. 查询数据库中这些物流单号的所有记录
         LambdaQueryWrapper<OrderRecord> wrapper = new LambdaQueryWrapper<>();
-        wrapper.in(OrderRecord::getTrackingNumber, excelTrackingNumbers);
+        wrapper.in(OrderRecord::getTrackingNumber, excelTrackingNumbers)
+                .orderByAsc(OrderRecord::getId);  // 按ID排序，确保稳定顺序
         List<OrderRecord> dbRecords = orderRecordMapper.selectList(wrapper);
 
         if (CollectionUtils.isEmpty(dbRecords)) {
             return List.of();
         }
 
-        // 3. 构建Excel中的记录映射（运单号+SN作为key）
-        Set<String> excelKeys = excelRecords.stream()
-                .filter(r -> StringUtils.hasText(r.getTrackingNumber()) && StringUtils.hasText(r.getSn()))
-                .map(r -> r.getTrackingNumber().toUpperCase() + "#" + r.getSn().toUpperCase())
-                .collect(Collectors.toSet());
+        // 4. 按 tracking+sn+model 分组数据库记录
+        Map<String, List<OrderRecord>> dbRecordsByKey = dbRecords.stream()
+                .collect(Collectors.groupingBy(
+                        r -> buildMatchKey(r.getTrackingNumber(), r.getSn(), r.getModel())
+                ));
 
-        // 4. 找出数据库有但Excel没有的记录
-        List<OrderRecord> deletedRecords = dbRecords.stream()
-                .filter(db -> {
-                    if (!StringUtils.hasText(db.getTrackingNumber()) || !StringUtils.hasText(db.getSn())) {
-                        return false;
-                    }
-                    String dbKey = db.getTrackingNumber().toUpperCase() + "#" + db.getSn().toUpperCase();
-                    return !excelKeys.contains(dbKey);
-                })
-                .collect(Collectors.toList());
+        // 5. 找出数据库比Excel多的记录（即被删除的记录）
+        List<OrderRecord> deletedRecords = new ArrayList<>();
+        for (Map.Entry<String, List<OrderRecord>> entry : dbRecordsByKey.entrySet()) {
+            String key = entry.getKey();
+            List<OrderRecord> dbList = entry.getValue();
+            long excelCount = excelCountByKey.getOrDefault(key, 0L);
+
+            // 如果数据库中的数量 > Excel中的数量，多出来的视为被删除
+            if (dbList.size() > excelCount) {
+                // 取后面多出来的记录作为被删除的
+                for (int i = (int) excelCount; i < dbList.size(); i++) {
+                    deletedRecords.add(dbList.get(i));
+                }
+            }
+        }
 
         return deletedRecords;
+    }
+
+    /**
+     * 构建记录唯一键：物流单号+SN（与主匹配逻辑保持一致）
+     */
+    private String buildRecordKey(String trackingNumber, String sn) {
+        String tracking = trackingNumber == null ? "" : trackingNumber.trim().toUpperCase(Locale.ROOT);
+        String snStr = sn == null ? "" : sn.trim().toUpperCase(Locale.ROOT);
+        return tracking + "|" + snStr;
+    }
+
+    /**
+     * 构建匹配键：物流单号+SN+Model（用于顺序匹配相同记录）
+     */
+    private String buildMatchKey(String trackingNumber, String sn, String model) {
+        String tracking = trackingNumber == null ? "" : trackingNumber.trim().toUpperCase(Locale.ROOT);
+        String snStr = sn == null ? "" : sn.trim().toUpperCase(Locale.ROOT);
+        String modelStr = model == null ? "" : model.trim().toUpperCase(Locale.ROOT);
+        return tracking + "|" + snStr + "|" + modelStr;
+    }
+
+    /**
+     * 使用预加载数据进行变更检测（支持顺序匹配相同 tracking+sn+model 的记录）
+     */
+    private boolean isChangedAndUpdateBaselineWithPreload(
+            OrderRecord r,
+            String operator,
+            Map<String, List<OrderRecord>> dbRecordsByKey,
+            Map<String, Integer> matchCounterByKey) {
+
+        Snapshot s = snaps(operator);
+        String matchKey = buildMatchKey(r.getTrackingNumber(), r.getSn(), r.getModel());
+
+        log.info("🔍 检测变更开始: tracking={}, sn={}, model={}, matchKey={}",
+                r.getTrackingNumber(), r.getSn(), r.getModel(), matchKey);
+
+        // 从预加载数据中按顺序获取匹配的数据库记录
+        OrderRecord dbLatest = null;
+        List<OrderCellStyle> dbStyles = null;
+
+        List<OrderRecord> candidates = dbRecordsByKey.get(matchKey);
+        if (candidates != null && !candidates.isEmpty()) {
+            int matchIndex = matchCounterByKey.getOrDefault(matchKey, 0);
+            if (matchIndex < candidates.size()) {
+                dbLatest = candidates.get(matchIndex);
+                // 增加计数器，下一个相同key的记录会匹配下一个数据库记录
+                matchCounterByKey.put(matchKey, matchIndex + 1);
+
+                r.setId(dbLatest.getId());
+                dbStyles = orderCellStyleMapper.selectList(
+                        new QueryWrapper<OrderCellStyle>().lambda()
+                                .eq(OrderCellStyle::getOrderId, dbLatest.getId())
+                );
+                log.info("🔍 顺序匹配成功: matchKey={}, matchIndex={}, dbId={}", matchKey, matchIndex, dbLatest.getId());
+            } else {
+                log.info("🔍 候选记录已用尽: matchKey={}, candidates.size={}, 需要新建", matchKey, candidates.size());
+            }
+        } else {
+            log.info("🔍 无候选记录: matchKey={}, 需要新建", matchKey);
+        }
+
+        // 如果找到匹配的数据库记录，进行比较
+        if (dbLatest != null) {
+            log.info("🔍 找到数据库记录: id={}, tracking={}, sn={}, model={}",
+                    dbLatest.getId(), dbLatest.getTrackingNumber(), dbLatest.getSn(), dbLatest.getModel());
+
+            Map<String, CellStyleSnap> curStyle = buildStyleMap(r);
+            Map<String, String> curValue = buildValueMap(r);
+            Map<String, CellStyleSnap> dbStyleMap = buildStyleMapFromDb(dbLatest, dbStyles);
+            Map<String, String> dbValueMap = buildValueMap(dbLatest);
+
+            List<String> order = Arrays.asList("tracking","model","sn","remark","amount");
+            boolean changed = false;
+
+            for (String f : order) {
+                CellStyleSnap a = dbStyleMap.get(f);
+                CellStyleSnap b = curStyle.get(f);
+                boolean styleChanged = !Objects.equals(a == null ? null : a.getBg(), b == null ? null : b.getBg())
+                        || !Objects.equals(a == null ? null : a.getFont(), b == null ? null : b.getFont())
+                        || !Objects.equals(a == null ? Boolean.FALSE : a.getStrike(), b == null ? Boolean.FALSE : b.getStrike())
+                        || !Objects.equals(a == null ? Boolean.FALSE : a.getBold(), b == null ? Boolean.FALSE : b.getBold());
+                String va = dbValueMap.get(f);
+                String vb = curValue.get(f);
+                boolean valueChanged = !Objects.equals(va, vb);
+                if (styleChanged || valueChanged) {
+                    changed = true;
+                    log.info("🔍 字段 {} 发生变化: 值[{} -> {}]", f, va, vb);
+                    break;
+                }
+            }
+
+            if (!changed) {
+                log.info("🔍 与数据库比较: 无变化");
+            }
+
+            // 更新内存快照
+            String key = styleKey(r);
+            s.LAST_IMPORT_SNAPSHOT.put(key, curStyle);
+            s.LAST_VALUE_SNAPSHOT.put(key, curValue);
+            if (r.getExcelRowIndex() != null) {
+                s.LAST_STYLE_BY_ROW.put(r.getExcelRowIndex(), curStyle);
+                s.LAST_VALUE_BY_ROW.put(r.getExcelRowIndex(), curValue);
+            }
+            String tKey = (r.getTrackingNumber() == null ? "" : r.getTrackingNumber().toUpperCase(Locale.ROOT));
+            s.LAST_STYLE_BY_TRACKING.put(tKey, curStyle);
+            s.LAST_VALUE_BY_TRACKING.put(tKey, curValue);
+
+            return changed;
+        }
+
+        // 数据库中不存在，视为新记录
+        log.info("🔍 数据库中未找到匹配记录，视为新记录: tracking={}, sn={}, model={}",
+                r.getTrackingNumber(), r.getSn(), r.getModel());
+
+        String key = styleKey(r);
+        Map<String, CellStyleSnap> curStyle = buildStyleMap(r);
+        Map<String, String> curValue = buildValueMap(r);
+
+        s.LAST_IMPORT_SNAPSHOT.put(key, curStyle);
+        s.LAST_VALUE_SNAPSHOT.put(key, curValue);
+        if (r.getExcelRowIndex() != null) {
+            s.LAST_STYLE_BY_ROW.put(r.getExcelRowIndex(), curStyle);
+            s.LAST_VALUE_BY_ROW.put(r.getExcelRowIndex(), curValue);
+        }
+        String tKey = (r.getTrackingNumber() == null ? "" : r.getTrackingNumber().toUpperCase(Locale.ROOT));
+        s.LAST_STYLE_BY_TRACKING.put(tKey, curStyle);
+        s.LAST_VALUE_BY_TRACKING.put(tKey, curValue);
+
+        return true;  // 新记录视为有变化
+    }
+
+    /**
+     * 检查字符串是否包含中文字符
+     */
+    private boolean containsChinese(String str) {
+        if (str == null || str.isEmpty()) {
+            return false;
+        }
+        return str.chars().anyMatch(ch -> Character.UnicodeBlock.of(ch) == Character.UnicodeBlock.CJK_UNIFIED_IDEOGRAPHS);
     }
 
     private void persistOrderStyles(OrderRecord r) {
@@ -842,24 +1042,25 @@ public class OrderServiceImpl implements OrderService {
         Map<String, OrderCellStyle> oldMap = new HashMap<>();
         for (OrderCellStyle s : old) oldMap.put(s.getField(), s);
 
-        mergeStyle(r.getId(), "tracking", oldMap.get("tracking"), r.getTrackingBgColor(), r.getTrackingFontColor(), r.getTrackingStrike());
-        mergeStyle(r.getId(), "model",    oldMap.get("model"),    r.getModelBgColor(),    r.getModelFontColor(),    r.getModelStrike());
-        mergeStyle(r.getId(), "sn",       oldMap.get("sn"),       r.getSnBgColor(),       r.getSnFontColor(),       r.getSnStrike());
-        mergeStyle(r.getId(), "amount",   oldMap.get("amount"),   r.getAmountBgColor(),   r.getAmountFontColor(),   r.getAmountStrike());
-        mergeStyle(r.getId(), "remark",   oldMap.get("remark"),   r.getRemarkBgColor(),   r.getRemarkFontColor(),   r.getRemarkStrike());
+        mergeStyle(r.getId(), "tracking", oldMap.get("tracking"), r.getTrackingBgColor(), r.getTrackingFontColor(), r.getTrackingStrike(), r.getTrackingBold());
+        mergeStyle(r.getId(), "model",    oldMap.get("model"),    r.getModelBgColor(),    r.getModelFontColor(),    r.getModelStrike(),    r.getModelBold());
+        mergeStyle(r.getId(), "sn",       oldMap.get("sn"),       r.getSnBgColor(),       r.getSnFontColor(),       r.getSnStrike(),       r.getSnBold());
+        mergeStyle(r.getId(), "amount",   oldMap.get("amount"),   r.getAmountBgColor(),   r.getAmountFontColor(),   r.getAmountStrike(),   r.getAmountBold());
+        mergeStyle(r.getId(), "remark",   oldMap.get("remark"),   r.getRemarkBgColor(),   r.getRemarkFontColor(),   r.getRemarkStrike(),   r.getRemarkBold());
     }
 
     // 合并策略：
     // - bg/fg：新值非空则覆盖；否则保留旧值
-    // - strike：只有新值为 true 才覆盖为 true；否则保留旧值（避免无意清空旧的删除线）
-    // - 如果最终三项都为空/false，则：若原本有记录则保留不变；若原本没有记录则不写入
+    // - strike/bold：只有新值为 true 才覆盖为 true；否则保留旧值（避免无意清空旧的删除线/加粗）
+    // - 如果最终所有项都为空/false，则：若原本有记录则保留不变；若原本没有记录则不写入
     private void mergeStyle(Long orderId, String field, OrderCellStyle old,
-                            String newBg, String newFg, Boolean newStrike) {
+                            String newBg, String newFg, Boolean newStrike, Boolean newBold) {
         String bg = (newBg != null && !newBg.isBlank()) ? newBg : (old == null ? null : old.getBgColor());
         String fg = (newFg != null && !newFg.isBlank()) ? newFg : (old == null ? null : old.getFontColor());
         Boolean strike = (newStrike != null && newStrike) ? Boolean.TRUE : (old == null ? Boolean.FALSE : old.getStrike());
+        Boolean bold = (newBold != null && newBold) ? Boolean.TRUE : (old == null ? Boolean.FALSE : old.getBold());
 
-        boolean has = (bg != null && !bg.isBlank()) || (fg != null && !fg.isBlank()) || Boolean.TRUE.equals(strike);
+        boolean has = (bg != null && !bg.isBlank()) || (fg != null && !fg.isBlank()) || Boolean.TRUE.equals(strike) || Boolean.TRUE.equals(bold);
         if (!has) {
             // 没有任何样式：如果原来有记录，保持不动（不删除）；如果没有，什么也不做
             return;
@@ -871,15 +1072,18 @@ public class OrderServiceImpl implements OrderService {
             s.setBgColor(bg);
             s.setFontColor(fg);
             s.setStrike(Boolean.TRUE.equals(strike));
+            s.setBold(Boolean.TRUE.equals(bold));
             orderCellStyleMapper.insert(s);
         } else {
             boolean changed = !Objects.equals(bg, old.getBgColor())
                     || !Objects.equals(fg, old.getFontColor())
-                    || !Objects.equals(Boolean.TRUE.equals(strike), Boolean.TRUE.equals(old.getStrike()));
+                    || !Objects.equals(Boolean.TRUE.equals(strike), Boolean.TRUE.equals(old.getStrike()))
+                    || !Objects.equals(Boolean.TRUE.equals(bold), Boolean.TRUE.equals(old.getBold()));
             if (changed) {
                 old.setBgColor(bg);
                 old.setFontColor(fg);
                 old.setStrike(Boolean.TRUE.equals(strike));
+                old.setBold(Boolean.TRUE.equals(bold));
                 orderCellStyleMapper.updateById(old);
             }
         }
@@ -899,26 +1103,31 @@ public class OrderServiceImpl implements OrderService {
                         r.setTrackingBgColor(s.getBgColor());
                         r.setTrackingFontColor(s.getFontColor());
                         r.setTrackingStrike(Boolean.TRUE.equals(s.getStrike()));
+                        r.setTrackingBold(Boolean.TRUE.equals(s.getBold()));
                         break;
                     case "model":
                         r.setModelBgColor(s.getBgColor());
                         r.setModelFontColor(s.getFontColor());
                         r.setModelStrike(Boolean.TRUE.equals(s.getStrike()));
+                        r.setModelBold(Boolean.TRUE.equals(s.getBold()));
                         break;
                     case "sn":
                         r.setSnBgColor(s.getBgColor());
                         r.setSnFontColor(s.getFontColor());
                         r.setSnStrike(Boolean.TRUE.equals(s.getStrike()));
+                        r.setSnBold(Boolean.TRUE.equals(s.getBold()));
                         break;
                     case "amount":
                         r.setAmountBgColor(s.getBgColor());
                         r.setAmountFontColor(s.getFontColor());
                         r.setAmountStrike(Boolean.TRUE.equals(s.getStrike()));
+                        r.setAmountBold(Boolean.TRUE.equals(s.getBold()));
                         break;
                     case "remark":
                         r.setRemarkBgColor(s.getBgColor());
                         r.setRemarkFontColor(s.getFontColor());
                         r.setRemarkStrike(Boolean.TRUE.equals(s.getStrike()));
+                        r.setRemarkBold(Boolean.TRUE.equals(s.getBold()));
                         break;
                 }
             }
@@ -984,21 +1193,6 @@ public class OrderServiceImpl implements OrderService {
 
     private Boolean bool(Boolean b) { return b != null && b; }
 
-    private Map<String, List<String>> findDuplicateSnInList(List<OrderRecord> records) {
-        Map<String, List<String>> map = new HashMap<>();
-        records.stream()
-                .filter(r -> StringUtils.hasText(r.getSn()))
-                .forEach(r -> {
-                    String sn = r.getSn().trim();
-                    map.computeIfAbsent(sn, key -> new ArrayList<>()).add(
-                            StringUtils.hasText(r.getTrackingNumber()) ? r.getTrackingNumber().trim() : "(无单号)"
-                    );
-                });
-        return map.entrySet().stream()
-                .filter(e -> e.getValue().size() > 1)
-                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
-    }
-
     @Override
     @Transactional
     @CacheEvict(value = "orders", allEntries = true)
@@ -1042,7 +1236,10 @@ public class OrderServiceImpl implements OrderService {
 
     @Override
     @Transactional
-    @CacheEvict(value = "orders", allEntries = true)
+    @org.springframework.cache.annotation.Caching(evict = {
+        @CacheEvict(value = "orders", allEntries = true),
+        @CacheEvict(value = "settlements", allEntries = true)
+    })
     public void updateStatus(Long id, String status) {
         OrderRecord record = orderRecordMapper.selectById(id);
         if (record == null) {
@@ -1052,6 +1249,16 @@ public class OrderServiceImpl implements OrderService {
         int updated = orderRecordMapper.updateById(record);
         if (updated == 0) {
             throw new BusinessException(ErrorCode.OPTIMISTIC_LOCK_CONFLICT);
+        }
+
+        // 同步更新关联的结账记录状态
+        com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.example.demo.settlement.entity.SettlementRecord> wrapper =
+            new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<>();
+        wrapper.eq(com.example.demo.settlement.entity.SettlementRecord::getOrderId, id);
+        java.util.List<com.example.demo.settlement.entity.SettlementRecord> settlements = settlementRecordMapper.selectList(wrapper);
+        for (com.example.demo.settlement.entity.SettlementRecord settlement : settlements) {
+            settlement.setStatus(status);
+            settlementRecordMapper.updateById(settlement);
         }
     }
 
@@ -1205,7 +1412,14 @@ public class OrderServiceImpl implements OrderService {
             record.setAmount(request.getAmount());
         }
         if (StringUtils.hasText(request.getStatus())) {
-            record.setStatus(request.getStatus());
+            String newStatus = request.getStatus();
+            record.setStatus(newStatus);
+            // 状态变为PAID时记录打款时间
+            if ("PAID".equals(newStatus) && record.getPaidAt() == null) {
+                record.setPaidAt(LocalDateTime.now());
+            } else if (!"PAID".equals(newStatus)) {
+                record.setPaidAt(null);
+            }
         }
         if (request.getRemark() != null) {
             record.setRemark(request.getRemark());

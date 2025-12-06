@@ -35,7 +35,11 @@ apiClient.interceptors.response.use(response => {
         window.location.href = '/login';
     }
     else {
-        ElMessage.error(error.response?.data?.message ?? '网络错误');
+        const errorMessage = error.response?.data?.message ?? '网络错误';
+        // 乐观锁冲突由各页面自己处理显示更明确的提示，这里不重复显示
+        if (!errorMessage.includes('已被') && !errorMessage.includes('修改')) {
+            ElMessage.error(errorMessage);
+        }
     }
     return Promise.reject(error);
 });

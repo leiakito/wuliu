@@ -177,7 +177,7 @@
       <template #footer>
         <div class="dialog-footer">
           <div class="muted small">
-            已选 {{ batchDialog.files.length }} 个文件；仅处理文件名格式为 <code>yyyy-MM-dd.xlsx</code> 的记录。
+            已选 {{ batchDialog.files.length }} 个文件，总大小 {{ formatSize(batchDialog.files.reduce((sum, f) => sum + f.size, 0)) }} / 500MB；仅处理文件名格式为 <code>yyyy-MM-dd.xlsx</code> 的记录。
           </div>
           <div class="footer-actions">
             <el-button @click="batchDialog.visible = false" :disabled="batchDialog.uploading">取消</el-button>
@@ -438,7 +438,22 @@ const formatSize = (size: number) => {
 };
 
 const addFiles = (fileList: FileList | File[]) => {
+  const MAX_TOTAL_SIZE = 500 * 1024 * 1024; // 500MB
   const existingKeys = new Set(batchDialog.files.map(f => `${f.name}-${f.priceDate ?? ''}`));
+
+  // 计算当前已选文件的总大小
+  const currentTotalSize = batchDialog.files.reduce((sum, f) => sum + f.size, 0);
+
+  // 计算新增文件的总大小
+  const newFilesSize = Array.from(fileList).reduce((sum, file) => sum + file.size, 0);
+
+  // 检查总大小是否超限
+  if (currentTotalSize + newFilesSize > MAX_TOTAL_SIZE) {
+    const totalSizeMB = ((currentTotalSize + newFilesSize) / 1024 / 1024).toFixed(1);
+    ElMessage.error(`文件总大小不能超过 500MB，当前已选 ${totalSizeMB}MB`);
+    return;
+  }
+
   Array.from(fileList).forEach(file => {
     const priceDate = parseDateFromName(file.name);
     const key = `${file.name}-${priceDate}`;

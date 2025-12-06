@@ -175,7 +175,7 @@
         <el-table-column
           prop="trackingNumber"
           label="单号"
-          width="260"
+          width="180"
           sortable="custom"
           :sort-orders="['ascending', 'descending']"
         >
@@ -183,14 +183,20 @@
             <span :style="styleFor(row, 'tracking')">{{ row.trackingNumber }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="model" label="型号" width="400">
+        <el-table-column prop="model" label="型号" width="280">
           <template #default="{ row }">
             <span :style="styleFor(row, 'model')">{{ row.model || '-' }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="orderSn" label="SN" width="340">
+        <el-table-column prop="orderSn" label="SN" width="180">
           <template #default="{ row }">
-            <span :style="styleFor(row, 'sn')">{{ row.orderSn || '-' }}</span>
+            <span
+              :style="styleFor(row, 'sn')"
+              :class="{ 'sn-wrap': row.orderSn && row.orderSn.length > 7 }"
+              class="sn-cell"
+              @click="copySn(row.orderSn)"
+              :title="row.orderSn ? '点击复制' : ''"
+            >{{ row.orderSn || '-' }}</span>
           </template>
         </el-table-column>
         <el-table-column
@@ -207,9 +213,8 @@
               :step="10"
               size="small"
               :controls="false"
-              placeholder="输入金额确认"
+              placeholder="输入金额"
               style="width: 100%"
-              @change="(currentValue, oldValue) => handleAmountChange(row, currentValue, oldValue)"
             />
           </template>
         </el-table-column>
@@ -232,10 +237,16 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="payableAt" label="应付日期" width="140" />
-        <el-table-column prop="remark" label="备注">
+        <el-table-column prop="remark" label="备注" width="200">
           <template #default="{ row }">
-            <span :style="styleFor(row, 'remark')">{{ row.remark || '-' }}</span>
+            <el-input
+              v-model="row.remark"
+              size="small"
+              placeholder="输入备注"
+              :style="styleFor(row, 'remark')"
+              @focus="onRemarkFocus(row)"
+              @blur="onRemarkBlur(row)"
+            />
           </template>
         </el-table-column>
         <el-table-column label="操作" width="160">
@@ -428,7 +439,7 @@ const PAGE_SIZE_KEY = 'settlements-page-size';
 const savedPageSize = Number(localStorage.getItem(PAGE_SIZE_KEY)) || 50;
 
 const filters = reactive({
-  status: 'PENDING', // 默认只显示待结账状态，不显示待结账工作区的已确认数据
+  status: '', // 默认显示全部状态
   ownerUsername: '',
   submitterUsername: '',
   trackingNumber: '',
@@ -670,48 +681,45 @@ const handleRowClick = (row: SettlementRecord) => {
   tableRef.value?.toggleRowSelection(row, !alreadySelected);
 };
 
-const handleAmountChange = async (row: SettlementRecord, currentValue: number | undefined, oldValue: number | undefined) => {
-  if (currentValue === null || currentValue === undefined) {
-    return; // 如果用户清空了输入框，则不执行任何操作
-  }
+// 备注编辑：记录聚焦时的原始值
+const remarkOriginalValues = new Map<number, string>();
 
-  // 如果值没有实际变化，则不触发确认
-  if (currentValue === oldValue) {
+const onRemarkFocus = (row: SettlementRecord) => {
+  remarkOriginalValues.set(row.id, row.remark || '');
+};
+
+const onRemarkBlur = async (row: SettlementRecord) => {
+  const originalValue = remarkOriginalValues.get(row.id) ?? '';
+  const newValue = row.remark || '';
+
+  // 如果值没有变化，不发请求
+  if (originalValue === newValue) {
+    remarkOriginalValues.delete(row.id);
     return;
   }
 
   try {
-    const payload: SettlementConfirmRequest = {
-      amount: currentValue,
-      remark: row.remark, // 保留现有的备注
-      version: row.version // 乐观锁版本号
+    const payload = {
+      amount: row.amount ?? 0,
+      remark: newValue,
+      version: row.version ?? 0
     };
-    await confirmSettlement(row.id, payload);
-
-    // 直接在界面上更新行状态，提供即时反馈
-    row.status = 'CONFIRMED';
-    row.amount = currentValue;
-
-    ElMessage.success(`记录 ${row.trackingNumber || row.orderSn} 已确认`);
-
+    await updateSettlementAmount(row.id, payload);
+    // 更新本地版本号
+    row.version = (row.version ?? 0) + 1;
+    remarkOriginalValues.delete(row.id);
   } catch (error: any) {
-    console.error('快速确认失败:', error);
-    // 如果API调用失败，将金额恢复到旧值
-    row.amount = oldValue;
-
-    // 检查是否是乐观锁冲突
     const errorMessage = error?.response?.data?.message || error?.message || '';
     if (errorMessage.includes('已被') || errorMessage.includes('修改')) {
-      // 乐观锁冲突，强调提示并刷新
       ElMessage({
         type: 'warning',
-        message: '⚠️ 该记录已被其他用户修改，已自动刷新最新数据，请重新操作',
+        message: '该记录已被其他用户修改，已自动刷新最新数据',
         duration: 5000,
         showClose: true
       });
+    } else {
+      ElMessage.error('保存备注失败');
     }
-
-    // 刷新数据获取最新版本号
     await loadData();
   }
 };
@@ -1016,7 +1024,7 @@ watch(() => batchSnPriceDialog.form.snInput, (input) => {
   batchSnPriceDialog.duplicateSns = duplicates;
 });
 
-const downloadExcel = async (params: SettlementExportRequest, fileName = 'settlements.xlsx') => {
+const downloadExcel = async (params: SettlementExportRequest, fileName = '待结账.xlsx') => {
   const response = await exportSettlements(params);
   const blob = new Blob([response.data], { type: 'application/octet-stream' });
   const url = window.URL.createObjectURL(blob);
@@ -1128,6 +1136,13 @@ const styleFor = (row: SettlementRecord, field: 'tracking' | 'model' | 'sn' | 'a
 
 const statusLabel = (value?: string) => settlementStatusMap[value ?? ''] || '未知';
 
+const copySn = (sn?: string) => {
+  if (!sn) return;
+  navigator.clipboard.writeText(sn).then(() => {
+    ElMessage.success('已复制');
+  });
+};
+
 // fetchAllSettlements 已移除，改为后端直接过滤返回结果
 
 // 所有用户都加载用户选项和归属人选项（避免选项被当前结果集限制）
@@ -1207,5 +1222,16 @@ loadData();
 :deep(.el-table__body td),
 :deep(.el-table__body td .cell) {
   color: #0a0a0a;
+}
+.sn-cell {
+  cursor: pointer;
+}
+.sn-wrap {
+  word-break: break-all;
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 </style>

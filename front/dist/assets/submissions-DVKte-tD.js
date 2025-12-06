@@ -1,1 +1,0 @@
-import{j as i}from"./index-DVwYDEL5.js";const t=s=>i.post("/user-submissions",s),e=s=>i.post("/user-submissions/batch",s),n=s=>i.get("/user-submissions/mine",{params:s}),u=s=>i.get("/user-submissions",{params:s}),m=s=>i.get("/user-submissions/owners",{params:s}),b=s=>i.get("/user-submission-logs",{params:s});export{e as a,n as b,b as c,u as f,m as l,t as s};

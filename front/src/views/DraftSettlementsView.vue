@@ -175,7 +175,7 @@
         <el-table-column
           prop="trackingNumber"
           label="单号"
-          width="260"
+          width="180"
           sortable="custom"
           :sort-orders="['ascending', 'descending']"
         >
@@ -183,12 +183,12 @@
             <span :style="styleFor(row, 'tracking')">{{ row.trackingNumber }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="model" label="型号" width="400">
+        <el-table-column prop="model" label="型号" width="280">
           <template #default="{ row }">
             <span :style="styleFor(row, 'model')">{{ row.model || '-' }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="orderSn" label="SN" width="340">
+        <el-table-column prop="orderSn" label="SN" width="180">
           <template #default="{ row }">
             <span :style="styleFor(row, 'sn')">{{ row.orderSn || '-' }}</span>
           </template>
@@ -207,9 +207,10 @@
               :step="10"
               size="small"
               :controls="false"
-              placeholder="输入金额确认"
+              placeholder="输入金额"
               style="width: 100%"
-              @change="(currentValue, oldValue) => handleAmountChange(row, currentValue, oldValue)"
+              @focus="onAmountFocus(row)"
+              @blur="onAmountBlur(row)"
             />
           </template>
         </el-table-column>
@@ -232,10 +233,16 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="payableAt" label="应付日期" width="140" />
-        <el-table-column prop="remark" label="备注">
+        <el-table-column prop="remark" label="备注" width="200">
           <template #default="{ row }">
-            <span :style="styleFor(row, 'remark')">{{ row.remark || '-' }}</span>
+            <el-input
+              v-model="row.remark"
+              size="small"
+              placeholder="输入备注"
+              :style="styleFor(row, 'remark')"
+              @focus="onRemarkFocus(row)"
+              @blur="onRemarkBlur(row)"
+            />
           </template>
         </el-table-column>
         <el-table-column label="操作" width="160">
@@ -670,55 +677,84 @@ const handleRowClick = (row: SettlementRecord) => {
   tableRef.value?.toggleRowSelection(row, !alreadySelected);
 };
 
-const handleAmountChange = async (row: SettlementRecord, currentValue: number | undefined, oldValue: number | undefined) => {
-  if (currentValue === null || currentValue === undefined) {
-    return; // 如果用户清空了输入框，则不执行任何操作
-  }
+// 金额和备注编辑：记录聚焦时的原始值
+const amountOriginalValues = new Map<number, number | undefined>();
+const remarkOriginalValues = new Map<number, string>();
 
-  // 如果值没有实际变化，则不触发确认
-  if (currentValue === oldValue) {
+const onAmountFocus = (row: SettlementRecord) => {
+  amountOriginalValues.set(row.id, row.amount);
+};
+
+const onAmountBlur = async (row: SettlementRecord) => {
+  const originalValue = amountOriginalValues.get(row.id);
+  const newValue = row.amount;
+
+  // 如果值没有变化，不发请求
+  if (originalValue === newValue) {
+    amountOriginalValues.delete(row.id);
     return;
   }
 
   try {
-    const payload: SettlementConfirmRequest = {
-      amount: currentValue,
-      remark: row.remark, // 保留现有的备注
-      version: row.version // 乐观锁版本号
+    const payload = {
+      amount: newValue ?? 0,
+      remark: row.remark,
+      version: row.version ?? 0
     };
-    await confirmSettlement(row.id, payload);
-
-    // 直接在界面上更新行状态，提供即时反馈
-    row.status = 'CONFIRMED';
-    row.amount = currentValue;
-
-    ElMessage.success(`记录 ${row.trackingNumber || row.orderSn} 已确认`);
-
-    // 如果当前筛选条件是 DRAFT，自动切换到显示所有状态
-    if (filters.status === 'DRAFT') {
-      filters.status = '';
-      await nextTick();
-      loadData();
-    }
-
+    await updateSettlementAmount(row.id, payload);
+    row.version = (row.version ?? 0) + 1;
+    amountOriginalValues.delete(row.id);
   } catch (error: any) {
-    console.error('快速确认失败:', error);
-    // 如果API调用失败，将金额恢复到旧值
-    row.amount = oldValue;
-
-    // 检查是否是乐观锁冲突
     const errorMessage = error?.response?.data?.message || error?.message || '';
     if (errorMessage.includes('已被') || errorMessage.includes('修改')) {
-      // 乐观锁冲突，强调提示并刷新
       ElMessage({
         type: 'warning',
-        message: '⚠️ 该记录已被其他用户修改，已自动刷新最新数据，请重新操作',
+        message: '该记录已被其他用户修改，已自动刷新最新数据',
         duration: 5000,
         showClose: true
       });
+    } else {
+      ElMessage.error('保存金额失败');
     }
+    await loadData();
+  }
+};
 
-    // 刷新数据获取最新版本号
+const onRemarkFocus = (row: SettlementRecord) => {
+  remarkOriginalValues.set(row.id, row.remark || '');
+};
+
+const onRemarkBlur = async (row: SettlementRecord) => {
+  const originalValue = remarkOriginalValues.get(row.id) ?? '';
+  const newValue = row.remark || '';
+
+  // 如果值没有变化，不发请求
+  if (originalValue === newValue) {
+    remarkOriginalValues.delete(row.id);
+    return;
+  }
+
+  try {
+    const payload = {
+      amount: row.amount ?? 0,
+      remark: newValue,
+      version: row.version ?? 0
+    };
+    await updateSettlementAmount(row.id, payload);
+    row.version = (row.version ?? 0) + 1;
+    remarkOriginalValues.delete(row.id);
+  } catch (error: any) {
+    const errorMessage = error?.response?.data?.message || error?.message || '';
+    if (errorMessage.includes('已被') || errorMessage.includes('修改')) {
+      ElMessage({
+        type: 'warning',
+        message: '该记录已被其他用户修改，已自动刷新最新数据',
+        duration: 5000,
+        showClose: true
+      });
+    } else {
+      ElMessage.error('保存备注失败');
+    }
     await loadData();
   }
 };
@@ -761,13 +797,8 @@ const submitConfirm = async () => {
       version: confirmDialog.form.version // 传递版本号
     };
     await confirmSettlement(confirmDialog.targetId, payload);
-    ElMessage.success('已确认');
+    ElMessage.success('已确认，记录已移动到结账管理');
     confirmDialog.visible = false;
-
-    // 确认后自动切换到显示所有状态，避免用户看不到已确认的数据
-    if (filters.status === 'DRAFT') {
-      filters.status = '';
-    }
     loadData();
   } catch (error: any) {
     // 检查是否是乐观锁冲突
@@ -902,15 +933,10 @@ const submitBatchConfirm = async () => {
       remark: batchConfirmDialog.form.remark || undefined
     };
     await confirmSettlementsBatch(payload);
-    ElMessage.success('批量确认成功');
+    ElMessage.success('批量确认成功，记录已移动到结账管理');
     batchConfirmDialog.visible = false;
     selectedIds.value = [];
     selectedRecords.value = [];
-
-    // 确认后自动切换到显示所有状态，避免用户看不到已确认的数据
-    if (filters.status === 'DRAFT') {
-      filters.status = '';
-    }
     loadData();
   } finally {
     batchConfirmDialog.loading = false;
@@ -1175,12 +1201,7 @@ const handleConfirmAll = async () => {
     delete payload.size;
 
     const count = await confirmAllSettlements(payload);
-    ElMessage.success(`操作成功，已确认 ${count} 条记录。`);
-
-    // 确认后自动切换到显示所有状态，避免用户看不到已确认的数据
-    if (filters.status === 'DRAFT') {
-      filters.status = '';
-    }
+    ElMessage.success(`操作成功，已确认 ${count} 条记录，已移动到结账管理`);
     loadData(); // 重新加载数据
   } catch (error) {
     console.error('确认全部失败:', error);

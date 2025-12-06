@@ -25,6 +25,7 @@ public class OrderRecord {
     private String remark;
     private String category;
     private String status;
+    private LocalDateTime paidAt;
     private BigDecimal amount;
     private String currency;
     private BigDecimal weight;
@@ -52,6 +53,8 @@ public class OrderRecord {
     private String modelFontColor;
     @TableField(exist = false)
     private Boolean modelStrike;
+    @TableField(exist = false)
+    private Boolean modelBold;
 
     @TableField(exist = false)
     private String snBgColor;
@@ -59,6 +62,8 @@ public class OrderRecord {
     private String snFontColor;
     @TableField(exist = false)
     private Boolean snStrike;
+    @TableField(exist = false)
+    private Boolean snBold;
 
     @TableField(exist = false)
     private String amountBgColor;
@@ -66,6 +71,8 @@ public class OrderRecord {
     private String amountFontColor;
     @TableField(exist = false)
     private Boolean amountStrike;
+    @TableField(exist = false)
+    private Boolean amountBold;
 
     @TableField(exist = false)
     private String remarkBgColor;
@@ -73,14 +80,18 @@ public class OrderRecord {
     private String remarkFontColor;
     @TableField(exist = false)
     private Boolean remarkStrike;
+    @TableField(exist = false)
+    private Boolean remarkBold;
 
     @TableField(exist = false)
     private Integer excelRowIndex;
-    
+
     @TableField(exist = false)
     private String trackingBgColor;
     @TableField(exist = false)
     private String trackingFontColor;
     @TableField(exist = false)
     private Boolean trackingStrike;
+    @TableField(exist = false)
+    private Boolean trackingBold;
 }

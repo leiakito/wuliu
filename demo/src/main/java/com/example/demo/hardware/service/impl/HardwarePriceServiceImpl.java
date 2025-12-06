@@ -128,6 +128,21 @@ public class HardwarePriceServiceImpl implements HardwarePriceService {
         if (CollectionUtils.isEmpty(files)) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "请至少上传一个 Excel 文件");
         }
+
+        // 验证文件总大小不超过 500MB
+        long totalSize = files.stream()
+            .filter(f -> f != null && !f.isEmpty())
+            .mapToLong(MultipartFile::getSize)
+            .sum();
+        long maxTotalSize = 500L * 1024 * 1024; // 500MB
+        if (totalSize > maxTotalSize) {
+            double totalSizeMB = totalSize / 1024.0 / 1024.0;
+            throw new BusinessException(
+                ErrorCode.BAD_REQUEST,
+                String.format("文件总大小不能超过 500MB，当前已上传 %.1f MB", totalSizeMB)
+            );
+        }
+
         List<HardwarePriceImportResult> results = new ArrayList<>();
         for (MultipartFile file : files) {
             if (file == null || file.isEmpty()) {

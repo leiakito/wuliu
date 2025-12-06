@@ -26,6 +26,8 @@ public class OrderCellStyle {
 
     private Boolean strike;
 
+    private Boolean bold;
+
     private LocalDateTime createdAt;
 
     private LocalDateTime updatedAt;

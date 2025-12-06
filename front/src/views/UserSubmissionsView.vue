@@ -42,37 +42,15 @@
           <el-form label-width="90px" class="inline-user-form">
             <el-form-item label="归属人">
               <div class="owner-input-wrapper">
-                <el-select
+                <el-input
                   v-model="selectedOwner"
-                  filterable
-                  allow-create
-                  clearable
-                  :placeholder="isAdmin ? '输入归属人名称，不填则归属当前管理员' : '输入归属人名称，不填则归属自己'"
+                  readonly
+                  :placeholder="isAdmin ? '点击管理按钮选择归属人' : '点击管理按钮选择归属人'"
                   style="flex: 1"
-                >
-                  <el-option
-                    v-for="owner in ownerOptions"
-                    :key="owner"
-                    :label="owner"
-                    :value="owner"
-                  >
-                    <div class="owner-option">
-                      <span>{{ owner }}</span>
-                      <el-button
-                        v-if="isAdmin"
-                        type="danger"
-                        text
-                        size="small"
-                        :icon="Delete"
-                        @click.stop="handleDeleteOwner(owner)"
-                      />
-                    </div>
-                  </el-option>
-                </el-select>
+                  @click="openOwnerDialog"
+                />
+                <el-button type="primary" style="margin-left: 8px" @click="openOwnerDialog">管理</el-button>
               </div>
-              <small style="color: #999; margin-top: 4px; display: block;">
-                可直接输入任意名称，无需预先创建
-              </small>
             </el-form-item>
           </el-form>
           <ul>
@@ -183,7 +161,7 @@
       />
     </el-card>
 
-    <el-card v-if="isAdmin && invalidTrackings.length" class="invalid-card">
+    <el-card v-if="invalidTrackings.length" class="invalid-card">
       <template #header>
         <div class="card-header">
           <span>未在物流单号中的单号</span>
@@ -246,6 +224,34 @@
         <el-button type="primary" :loading="batchDialog.loading" @click="submitBatch">提交</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="ownerDialogVisible" title="归属人管理" width="500px">
+      <div class="owner-dialog-header">
+        <el-button type="primary" size="small" @click="addOwner">添加</el-button>
+        <el-button
+          :type="deleteMode ? 'danger' : 'default'"
+          size="small"
+          @click="deleteMode = !deleteMode"
+        >
+          {{ deleteMode ? '取消删除' : '删除' }}
+        </el-button>
+      </div>
+      <div class="owner-grid">
+        <div
+          v-for="owner in ownerOptions"
+          :key="owner"
+          class="owner-item"
+          :class="{
+            'owner-item--selected': selectedOwner === owner,
+            'owner-item--delete-mode': deleteMode
+          }"
+          @click="handleOwnerClick(owner)"
+        >
+          {{ owner }}
+        </div>
+      </div>
+      <div v-if="!ownerOptions.length" class="owner-empty">暂无归属人，点击添加按钮新建</div>
+    </el-dialog>
   </div>
 </template>
 
@@ -255,7 +261,6 @@ import { computed, reactive, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import type { FormInstance, FormRules } from 'element-plus';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { Delete } from '@element-plus/icons-vue';
 import {
   fetchAllSubmissions,
   fetchMySubmissions,
@@ -320,6 +325,8 @@ const filters = reactive({
 });
 const ownerOptions = ref<string[]>([]);
 const selectedOwner = ref('');
+const ownerDialogVisible = ref(false);
+const deleteMode = ref(false);
 const OWNER_STORAGE_KEY = 'submission-owner';
 const INVALID_STORAGE_KEY = 'submission-invalid-trackings';
 type InvalidTracking = { trackingNumber: string; remark?: string; ownerUsername?: string };
@@ -391,6 +398,45 @@ const handleDeleteOwner = async (ownerName: string) => {
       console.error('删除归属人失败', error);
       ElMessage.error('删除失败');
     }
+  }
+};
+
+const openOwnerDialog = () => {
+  deleteMode.value = false;
+  ownerDialogVisible.value = true;
+  if (!ownerOptions.value.length) {
+    loadOwnerOptions();
+  }
+};
+
+const addOwner = async () => {
+  try {
+    const { value } = await ElMessageBox.prompt('请输入新归属人名称', '添加归属人', {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      inputPattern: /^.+$/,
+      inputErrorMessage: '名称不能为空'
+    });
+    if (value && value.trim()) {
+      const newOwner = value.trim();
+      if (!ownerOptions.value.includes(newOwner)) {
+        ownerOptions.value.push(newOwner);
+      }
+      selectedOwner.value = newOwner;
+      ownerDialogVisible.value = false;
+      ElMessage.success('添加成功');
+    }
+  } catch {
+    // 用户取消
+  }
+};
+
+const handleOwnerClick = async (owner: string) => {
+  if (deleteMode.value) {
+    await handleDeleteOwner(owner);
+  } else {
+    selectedOwner.value = owner;
+    ownerDialogVisible.value = false;
   }
 };
 
@@ -647,42 +693,7 @@ const formatOrderTime = (value?: string) => {
   return value.replace('T', ' ').slice(0, 19);
 };
 
-// const exportSubmissions = () => {
-//   if (!submissions.value.length) {
-//     ElMessage.info('暂无可导出的记录');
-//     return;
-//   }
-//   exportLoading.value = true;
-//   try {
-//     const headers = ['下单日期', '订单时间', '单号', '型号', '物流公司', '归属用户', '订单状态', '提交状态', '提交时间'];
-//     const rows = submissions.value.map(item => {
-//       const order = item.order;
-//       return [
-//         order?.orderDate ?? '-',
-//         formatOrderTime(order?.orderTime),
-//         item.trackingNumber ?? '-',
-//         order?.model ?? '-',
-//         order?.category ?? '-',
-//         item.ownerUsername ?? item.username ?? '-',
-//         orderStatusLabel(order?.status),
-//         statusLabel(item.status),
-//         formatDate(item.createdAt)
-//       ];
-//     });
-//     const csv = [headers, ...rows]
-//       .map(cols => cols.map(col => `"${String(col ?? '').replace(/"/g, '""')}"`).join(','))
-//       .join('\n');
-//     const blob = new Blob([csv], { type: 'application/vnd.ms-excel' });
-//     const url = window.URL.createObjectURL(blob);
-//     const a = document.createElement('a');
-//     a.href = url;
-//     a.download = `submissions-${new Date().toISOString().slice(0, 10)}.xls`;
-//     a.click();
-//     window.URL.revokeObjectURL(url);
-//   } finally {
-//     exportLoading.value = false;
-//   }
-// };
+
 const exportSubmissions = () => {
   if (!submissions.value.length) {
     ElMessage.info('暂无可导出的记录');
@@ -749,28 +760,7 @@ const exportSubmissions = () => {
     exportLoading.value = false;
   }
 };
-// const exportInvalidTrackings = () => {
-//   if (!invalidTrackings.value.length) {
-//     ElMessage.info('暂无可导出的单号');
-//     return;
-//   }
-//   const headers = ['单号', '备注', '归属人'];
-//   const rows = invalidTrackings.value.map(item => [
-//     item.trackingNumber ?? '',
-//     item.remark ?? '',
-//     item.ownerUsername ?? ''
-//   ]);
-//   const csv = [headers, ...rows]
-//     .map(cols => cols.map(col => `"${String(col ?? '').replace(/"/g, '""')}"`).join(','))
-//     .join('\n');
-//   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-//   const url = window.URL.createObjectURL(blob);
-//   const a = document.createElement('a');
-//   a.href = url;
-//   a.download = `invalid-trackings-${new Date().toISOString().slice(0, 10)}.csv`;
-//   a.click();
-//   window.URL.revokeObjectURL(url);
-// };
+
 const exportInvalidTrackings = () => {
   if (!invalidTrackings.value.length) {
     ElMessage.info('暂无可导出的单号');
@@ -805,7 +795,7 @@ const exportInvalidTrackings = () => {
   // 导出 xlsx
   XLSX.writeFile(
     workbook,
-    `invalid-trackings-${new Date().toISOString().slice(0, 10)}.xlsx`
+    `未在物流单号中的单号-${new Date().toISOString().slice(0, 10)}.xlsx`
   );
 };
 const clearInvalidTrackings = () => {
@@ -823,9 +813,7 @@ watch(isAdmin, value => {
   pagination.page = 1;
   loadOwnerOptions();
   loadStoredOwner();
-  if (value) {
-    loadInvalidTrackings();
-  }
+  loadInvalidTrackings();  // 所有用户都可以加载无效单号列表
   loadData();
 }, { immediate: true });
 
@@ -933,5 +921,56 @@ watch(isAdmin, value => {
 
 .owner-option span {
   flex: 1;
+}
+
+.owner-dialog-header {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.owner-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.owner-item {
+  padding: 12px 16px;
+  border: 1px solid #dcdfe6;
+  border-radius: 6px;
+  cursor: pointer;
+  text-align: center;
+  transition: all 0.2s;
+  background: #fff;
+}
+
+.owner-item:hover {
+  border-color: #409eff;
+  color: #409eff;
+}
+
+.owner-item--selected {
+  border-color: #409eff;
+  background: #ecf5ff;
+  color: #409eff;
+}
+
+.owner-item--delete-mode {
+  border-color: #f56c6c;
+}
+
+.owner-item--delete-mode:hover {
+  background: #fef0f0;
+  border-color: #f56c6c;
+  color: #f56c6c;
+}
+
+.owner-empty {
+  color: #909399;
+  text-align: center;
+  padding: 40px 0;
 }
 </style>

@@ -7,7 +7,6 @@ import com.baomidou.mybatisplus.annotation.TableLogic;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.baomidou.mybatisplus.annotation.Version;
 import java.math.BigDecimal;
-import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 import lombok.Data;
@@ -27,7 +26,6 @@ public class SettlementRecord {
     private String status;
     private Boolean warning;
     private String settleBatch;
-    private LocalDate payableAt;
     private String remark;
     private String ownerUsername;
     private String submitterUsername;

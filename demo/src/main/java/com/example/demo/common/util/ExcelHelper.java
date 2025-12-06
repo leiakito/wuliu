@@ -143,18 +143,9 @@ public final class ExcelHelper {
                     Cell remarkCell = row.getCell(4);
                     String remark = readMergedAwareString(sheet, i, 4);
 
-                    // ID（第9列，J列，简单格式可能没有此列）
-                    Long recordId = null;
-                    Cell idCell = row.getCell(9);
-                    if (idCell != null && isNumericCell(idCell)) {
-                        long id = (long) idCell.getNumericCellValue();
-                        if (id > 0) {
-                            recordId = id;
-                        }
-                    }
+                    // ID不再从Excel读取，改用SN+物流单号进行匹配
 
                     OrderRecord record = new OrderRecord();
-                    record.setId(recordId); // 设置ID
                     record.setOrderTime(dateTime);
                     if (dateTime != null) {
                         record.setOrderDate(dateTime.toLocalDate());
@@ -209,18 +200,9 @@ public final class ExcelHelper {
                     String mergedRemark = (remarkE == null || remarkE.isBlank()) ? (remarkF == null ? null : remarkF)
                                           : (remarkF == null || remarkF.isBlank() ? remarkE : (remarkE + " " + remarkF));
 
-                    // ID（第9列，J列）
-                    Long recordId = null;
-                    Cell idCell = row.getCell(9);
-                    if (idCell != null && isNumericCell(idCell)) {
-                        long id = (long) idCell.getNumericCellValue();
-                        if (id > 0) {
-                            recordId = id;
-                        }
-                    }
+                    // ID不再从Excel读取，改用SN+物流单号进行匹配
 
                     OrderRecord record = new OrderRecord();
-                    record.setId(recordId); // 设置ID
                     if (dateTime != null) {
                         record.setOrderTime(dateTime);
                         record.setOrderDate(dateTime.toLocalDate());
@@ -379,7 +361,7 @@ public static byte[] writeSettlements(List<SettlementRecord> records) throws IOE
 
     /**
      * 为导出排序/展示提供候选时间：
-     * 优先 orderTime，其次 confirmedAt、createdAt、updatedAt，最后 payableAt 当天 00:00。
+     * 优先 orderTime，其次 confirmedAt、createdAt、updatedAt。
      */
     private static LocalDateTime candidateTime(SettlementRecord record) {
         if (record == null) {
@@ -396,9 +378,6 @@ public static byte[] writeSettlements(List<SettlementRecord> records) throws IOE
         }
         if (record.getUpdatedAt() != null) {
             return record.getUpdatedAt();
-        }
-        if (record.getPayableAt() != null) {
-            return record.getPayableAt().atStartOfDay();
         }
         return null;
     }
@@ -578,26 +557,31 @@ public static byte[] writeSettlements(List<SettlementRecord> records) throws IOE
             record.setTrackingBgColor(getEffectiveBgHex(trackingCell));
             record.setTrackingFontColor(getFontHex(trackingCell));
             record.setTrackingStrike(isStrike(trackingCell));
+            record.setTrackingBold(isBold(trackingCell));
         }
         if (modelCell != null) {
             record.setModelBgColor(getEffectiveBgHex(modelCell));
             record.setModelFontColor(getFontHex(modelCell));
             record.setModelStrike(isStrike(modelCell));
+            record.setModelBold(isBold(modelCell));
         }
         if (snCell != null) {
             record.setSnBgColor(getEffectiveBgHex(snCell));
             record.setSnFontColor(getFontHex(snCell));
             record.setSnStrike(isStrike(snCell));
+            record.setSnBold(isBold(snCell));
         }
         if (amountCell != null) {
             record.setAmountBgColor(getEffectiveBgHex(amountCell));
             record.setAmountFontColor(getFontHex(amountCell));
             record.setAmountStrike(isStrike(amountCell));
+            record.setAmountBold(isBold(amountCell));
         }
         if (remarkCell != null) {
             record.setRemarkBgColor(getEffectiveBgHex(remarkCell));
             record.setRemarkFontColor(getFontHex(remarkCell));
             record.setRemarkStrike(isStrike(remarkCell));
+            record.setRemarkBold(isBold(remarkCell));
         }
     }
 
@@ -781,14 +765,33 @@ public static byte[] writeSettlements(List<SettlementRecord> records) throws IOE
         return false;
     }
 
+    private static boolean isBold(Cell cell) {
+        try {
+            CellStyle style = cell.getCellStyle();
+            if (style == null) return false;
+            Font f = cell.getSheet().getWorkbook().getFontAt(style.getFontIndex());
+            return f != null && f.getBold();
+        } catch (Throwable ignored) {}
+        return false;
+    }
+
     private static String toHexXSSF(XSSFColor color) {
         if (color == null) return null;
         byte[] rgb = color.getRGBWithTint();
         if (rgb == null) rgb = color.getRGB();
         if (rgb == null) return null;
-        int r = rgb[0] & 0xFF;
-        int g = rgb[1] & 0xFF;
-        int b = rgb[2] & 0xFF;
+        // Handle both RGB (3 bytes) and ARGB (4 bytes) formats
+        int r, g, b;
+        if (rgb.length == 4) {
+            // ARGB format - skip alpha channel
+            r = rgb[1] & 0xFF;
+            g = rgb[2] & 0xFF;
+            b = rgb[3] & 0xFF;
+        } else {
+            r = rgb[0] & 0xFF;
+            g = rgb[1] & 0xFF;
+            b = rgb[2] & 0xFF;
+        }
         return String.format("#%02X%02X%02X", r, g, b);
     }
 
@@ -853,13 +856,13 @@ public static byte[] writeSettlements(List<SettlementRecord> records) throws IOE
     }
 
     /**
-     * 导出订单记录到Excel，ID列移到J列（第9列）
+     * 导出订单记录到Excel（不再包含ID列）
      */
     public static byte[] writeOrders(List<OrderRecord> records) throws IOException {
         try (Workbook workbook = new XSSFWorkbook(); ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
             Sheet sheet = workbook.createSheet("订单数据");
 
-            // 表头：时间(A), 运单号(B), 型号(C), SN(D), 备注(E), 备注F(F), 金额(G), 状态(H), 客户名(I), ID(J)
+            // 表头：时间(A), 运单号(B), 型号(C), SN(D), 备注(E), 备注F(F), 金额(G), 状态(H), 客户名(I)
             Row header = sheet.createRow(0);
             header.createCell(0).setCellValue("时间");
             header.createCell(1).setCellValue("运单号");
@@ -870,7 +873,6 @@ public static byte[] writeSettlements(List<SettlementRecord> records) throws IOE
             header.createCell(6).setCellValue("金额");
             header.createCell(7).setCellValue("状态");
             header.createCell(8).setCellValue("客户名");
-            header.createCell(9).setCellValue("ID");
 
             int rowIndex = 1;
             for (OrderRecord record : records) {
@@ -918,15 +920,10 @@ public static byte[] writeSettlements(List<SettlementRecord> records) throws IOE
 
                 // 客户名（I列，第8列）
                 row.createCell(8).setCellValue(record.getCustomerName() == null ? "" : record.getCustomerName());
-
-                // ID（J列，第9列）
-                if (record.getId() != null) {
-                    row.createCell(9).setCellValue(record.getId());
-                }
             }
 
             // 自动列宽
-            for (int c = 0; c <= 9; c++) {
+            for (int c = 0; c <= 8; c++) {
                 sheet.autoSizeColumn(c);
             }
 

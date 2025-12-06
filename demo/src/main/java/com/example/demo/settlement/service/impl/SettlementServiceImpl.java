@@ -352,10 +352,10 @@ public class SettlementServiceImpl implements SettlementService {
             });
         }
         if (startDate != null) {
-            wrapper.ge(SettlementRecord::getPayableAt, startDate);
+            wrapper.ge(SettlementRecord::getOrderTime, startDate.atStartOfDay());
         }
         if (endDate != null) {
-            wrapper.le(SettlementRecord::getPayableAt, endDate);
+            wrapper.le(SettlementRecord::getOrderTime, endDate.plusDays(1).atStartOfDay());
         }
         if (StringUtils.hasText(ownerUsername)) {
             wrapper.eq(SettlementRecord::getOwnerUsername, ownerUsername.trim());
@@ -418,7 +418,6 @@ public class SettlementServiceImpl implements SettlementService {
         // 确认操作：将状态改为 CONFIRMED
         record.setStatus("CONFIRMED");
         record.setSettleBatch("BATCH-" + LocalDate.now());
-        record.setPayableAt(LocalDate.now());
         record.setConfirmedBy(operator);
         record.setConfirmedAt(LocalDateTime.now());
         int updated = settlementRecordMapper.updateById(record);
@@ -451,10 +450,10 @@ public class SettlementServiceImpl implements SettlementService {
             wrapper.eq(SettlementRecord::getSettleBatch, request.getBatch());
         }
         if (request.getStartDate() != null) {
-            wrapper.ge(SettlementRecord::getPayableAt, request.getStartDate());
+            wrapper.ge(SettlementRecord::getOrderTime, request.getStartDate().atStartOfDay());
         }
         if (request.getEndDate() != null) {
-            wrapper.le(SettlementRecord::getPayableAt, request.getEndDate());
+            wrapper.le(SettlementRecord::getOrderTime, request.getEndDate().plusDays(1).atStartOfDay());
         }
         if (StringUtils.hasText(request.getOwnerUsername())) {
             wrapper.eq(SettlementRecord::getOwnerUsername, request.getOwnerUsername().trim());
@@ -489,10 +488,10 @@ public class SettlementServiceImpl implements SettlementService {
             wrapper.eq(SettlementRecord::getSettleBatch, request.getBatch().trim());
         }
         if (request.getStartDate() != null) {
-            wrapper.ge(SettlementRecord::getPayableAt, request.getStartDate());
+            wrapper.ge(SettlementRecord::getOrderTime, request.getStartDate().atStartOfDay());
         }
         if (request.getEndDate() != null) {
-            wrapper.le(SettlementRecord::getPayableAt, request.getEndDate());
+            wrapper.le(SettlementRecord::getOrderTime, request.getEndDate().plusDays(1).atStartOfDay());
         }
         if (StringUtils.hasText(request.getOwnerUsername())) {
             wrapper.eq(SettlementRecord::getOwnerUsername, request.getOwnerUsername().trim());
@@ -567,7 +566,6 @@ public class SettlementServiceImpl implements SettlementService {
             // 确认操作：将状态改为 CONFIRMED
             record.setStatus("CONFIRMED");
             record.setSettleBatch("BATCH-" + LocalDate.now());
-            record.setPayableAt(LocalDate.now());
             record.setConfirmedBy(operator);
             record.setConfirmedAt(LocalDateTime.now());
             int updated = settlementRecordMapper.updateById(record);
@@ -1144,7 +1142,6 @@ public class SettlementServiceImpl implements SettlementService {
                 // 确认操作：将状态改为 CONFIRMED
                 record.setStatus("CONFIRMED");
                 record.setSettleBatch("BATCH-" + LocalDate.now());
-                record.setPayableAt(LocalDate.now());
                 record.setConfirmedBy(operator);
                 record.setConfirmedAt(LocalDateTime.now());
                 int updated = settlementRecordMapper.updateById(record);
@@ -1192,7 +1189,6 @@ public class SettlementServiceImpl implements SettlementService {
         wrapper.in(SettlementRecord::getId, ids)
                 .set(SettlementRecord::getStatus, "PENDING")
                 .set(SettlementRecord::getSettleBatch, null)  // 清除批次信息，等待正式确认
-                .set(SettlementRecord::getPayableAt, null)    // 清除应付日期
                 .set(SettlementRecord::getConfirmedBy, null)  // 清除确认人
                 .set(SettlementRecord::getConfirmedAt, null); // 清除确认时间
         int count = settlementRecordMapper.update(null, wrapper);
