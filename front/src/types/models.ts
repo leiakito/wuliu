@@ -26,6 +26,8 @@ export interface OrderRecord {
   remark?: string;
   category?: string;
   status?: string;
+  statusChangedAt?: string;  // 最后状态变更时间
+  paidAt?: string;           // 打款时间
   amount?: number;
   currency?: string;
   weight?: number;
@@ -36,6 +38,7 @@ export interface OrderRecord {
   updatedAt?: string;
   version?: number;
   inCurrentSettlement?: boolean;
+  ownerUsername?: string;    // 归属用户
   
   // 单元格格式字段 - 运单号列
   trackingBgColor?: string;
@@ -291,6 +294,7 @@ export interface UserSubmission {
   status: string;
   amount?: number;
   submissionDate?: string;
+  orderDate?: string;
   remark?: string;
   createdAt?: string;
   order?: OrderRecord;
@@ -299,6 +303,7 @@ export interface UserSubmission {
 export interface UserSubmissionCreateRequest {
   trackingNumber: string;
   username?: string;
+  orderDate?: string;
 }
 
 export interface UserSubmissionQueryRequest {
@@ -313,6 +318,7 @@ export interface UserSubmissionBatchRequest {
   trackingNumbers: string[];
   rawContent?: string;
   username?: string;
+  orderDate?: string;
 }
 
 export interface UserSubmissionLog {

@@ -47,8 +47,8 @@ spring:
 mybatis-plus:
   configuration:
     map-underscore-to-camel-case: true
-      #生产环境关闭日志log
-    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+    # 关闭 MyBatis 自带的控制台 SQL 日志，减少 IO 开销
+    log-impl: org.apache.ibatis.logging.nologging.NoLoggingImpl
   global-config:
     db-config:
       logic-delete-field: deleted
@@ -62,10 +62,11 @@ sa-token:
   is-log: false
 
 logging:
+  file:
+    name: logs/log.log
   level:
     root: warn                 # 全局 WARN，减少 IO
-    com.example.demo: info     # 业务包 INFO  #启用DEBUG日志查看缓存命中情况：
-    com.example.demo.settlement.service.SettlementCacheService: debug
+    com.example.demo: warn     # 业务默认收敛到 WARN，降低日志噪音
 app:
   settlement:
     warn-double-billing: true

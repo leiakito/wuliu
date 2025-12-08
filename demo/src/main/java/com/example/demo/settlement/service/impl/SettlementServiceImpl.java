@@ -77,23 +77,45 @@ public class SettlementServiceImpl implements SettlementService {
         Set<String> trackingNumbers = orders.stream()
             .map(OrderRecord::getTrackingNumber)
             .collect(Collectors.toSet());
+        Set<Long> orderIds = orders.stream()
+            .map(OrderRecord::getId)
+            .filter(id -> id != null)
+            .collect(Collectors.toSet());
+        
+        // 按 order_id 查询已存在的结账记录（用于判断是否重复）
+        Map<Long, SettlementRecord> existedByOrderIdMap = new HashMap<>();
+        if (!orderIds.isEmpty()) {
+            LambdaQueryWrapper<SettlementRecord> orderIdWrapper = new LambdaQueryWrapper<>();
+            orderIdWrapper.in(SettlementRecord::getOrderId, orderIds);
+            List<SettlementRecord> existedByOrderId = settlementRecordMapper.selectList(orderIdWrapper);
+            existedByOrderIdMap = existedByOrderId.stream()
+                .filter(r -> r.getOrderId() != null)
+                .collect(Collectors.toMap(SettlementRecord::getOrderId, r -> r, (a, b) -> a));
+        }
+        
+        // 同时按 trackingNumber 查询，用于二次结账警告（同一单号在不同订单中出现）
         LambdaQueryWrapper<SettlementRecord> wrapper = new LambdaQueryWrapper<>();
         wrapper.in(SettlementRecord::getTrackingNumber, trackingNumbers);
         List<SettlementRecord> existed = settlementRecordMapper.selectList(wrapper);
-        Map<String, SettlementRecord> existedMap = existed.stream()
+        Map<String, SettlementRecord> existedByTrackingMap = existed.stream()
             .collect(Collectors.toMap(SettlementRecord::getTrackingNumber, r -> r, (a, b) -> a));
+        
         Map<String, SubmissionInfo> submissionInfoMap = resolveSubmissionInfo(trackingNumbers);
         List<SettlementRecord> created = new ArrayList<>();
         for (OrderRecord order : orders) {
-            if (existedMap.containsKey(order.getTrackingNumber())) {
-                // 二次结账警告
-                SettlementRecord existedRecord = existedMap.get(order.getTrackingNumber());
+            // 按 order_id 判断是否已存在（同一订单不重复创建）
+            if (order.getId() != null && existedByOrderIdMap.containsKey(order.getId())) {
+                // 该订单已有结账记录，更新警告标记
+                SettlementRecord existedRecord = existedByOrderIdMap.get(order.getId());
                 if (warnDouble && Boolean.FALSE.equals(existedRecord.getWarning())) {
                     existedRecord.setWarning(true);
                     settlementRecordMapper.updateById(existedRecord);
                 }
                 continue;
             }
+            
+            // 检查是否有相同单号的其他订单已结账（二次结账警告）
+            boolean hasOtherSettlement = existedByTrackingMap.containsKey(order.getTrackingNumber());
             SettlementRecord record = new SettlementRecord();
             record.setOrderId(order.getId());
             record.setTrackingNumber(order.getTrackingNumber());
@@ -104,7 +126,8 @@ public class SettlementServiceImpl implements SettlementService {
             record.setCurrency(order.getCurrency() != null ? order.getCurrency() : "CNY");
             record.setStatus("PENDING");
             record.setManualInput(false);
-            record.setWarning(warnDouble && Boolean.TRUE.equals(order.isInCurrentSettlement()));
+            // 如果同单号已有其他结账记录，或订单本身标记为当前结算中，则设置警告
+            record.setWarning(warnDouble && (hasOtherSettlement || Boolean.TRUE.equals(order.isInCurrentSettlement())));
             record.setRemark(order.getRemark());
             // 设置归属人和提交人信息
             SubmissionInfo info = submissionInfoMap.get(order.getTrackingNumber());
@@ -420,6 +443,8 @@ public class SettlementServiceImpl implements SettlementService {
         record.setSettleBatch("BATCH-" + LocalDate.now());
         record.setConfirmedBy(operator);
         record.setConfirmedAt(LocalDateTime.now());
+        // 更新提交人为当前确认操作的用户
+        record.setSubmitterUsername(operator);
         int updated = settlementRecordMapper.updateById(record);
         if (updated == 0) {
             throw new BusinessException(ErrorCode.OPTIMISTIC_LOCK_CONFLICT);
@@ -568,6 +593,8 @@ public class SettlementServiceImpl implements SettlementService {
             record.setSettleBatch("BATCH-" + LocalDate.now());
             record.setConfirmedBy(operator);
             record.setConfirmedAt(LocalDateTime.now());
+            // 更新提交人为当前确认操作的用户
+            record.setSubmitterUsername(operator);
             int updated = settlementRecordMapper.updateById(record);
             if (updated == 0) {
                 // 批量操作中单条失败，记录日志但继续处理其他记录
@@ -890,7 +917,13 @@ public class SettlementServiceImpl implements SettlementService {
         if (order == null) {
             return;
         }
-        order.setStatus("PAID");
+        // 只有状态真的改变时才更新状态变更时间
+        String oldStatus = order.getStatus();
+        if (!"PAID".equals(oldStatus)) {
+            order.setStatus("PAID");
+            order.setStatusChangedAt(LocalDateTime.now());
+            order.setPaidAt(LocalDateTime.now());
+        }
         if (amount != null) {
             order.setAmount(amount);
         }
@@ -1144,6 +1177,8 @@ public class SettlementServiceImpl implements SettlementService {
                 record.setSettleBatch("BATCH-" + LocalDate.now());
                 record.setConfirmedBy(operator);
                 record.setConfirmedAt(LocalDateTime.now());
+                // 更新提交人为当前确认操作的用户
+                record.setSubmitterUsername(operator);
                 int updated = settlementRecordMapper.updateById(record);
                 if (updated == 0) {
                     // 全部确认时单条失败，记录日志但继续处理其他记录

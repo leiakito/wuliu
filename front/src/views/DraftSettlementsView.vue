@@ -422,7 +422,8 @@ import type {
 import { useAuthStore } from '@/store/auth';
 
 const auth = useAuthStore();
-const isAdmin = computed(() => auth.user?.role === 'ADMIN');
+// 所有用户都可以使用全部功能
+const isAdmin = computed(() => true);
 const settlementStatusMap: Record<string, string> = {
   PENDING: '待结账',
   CONFIRMED: '已确认',

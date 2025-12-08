@@ -199,7 +199,8 @@ import type { HardwarePrice, HardwarePriceRequest, HardwareImportResult } from '
 import { useAuthStore } from '@/store/auth';
 
 const auth = useAuthStore();
-const isAdmin = computed(() => auth.user?.role === 'ADMIN');
+// 所有用户都可以使用全部功能
+const isAdmin = computed(() => true);
 const fileInput = ref<HTMLInputElement>();
 const FILTER_STORAGE_KEY = 'hardware-price-filters';
 

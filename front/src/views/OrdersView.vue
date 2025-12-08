@@ -264,29 +264,82 @@
     </el-card>
 
     <el-card class="table-card">
+      <div class="table-toolbar">
+        <div class="toolbar-left">
+          <el-button type="success" @click="handleExportExcel('all')">
+            <el-icon><Download /></el-icon>
+            全部导出
+          </el-button>
+          <el-button type="primary" :disabled="!selectedRows.length" @click="handleExportExcel('selected')">
+            <el-icon><Download /></el-icon>
+            导出选中 ({{ selectedRows.length }})
+          </el-button>
+        </div>
+        <div class="toolbar-right">
+          <el-popover placement="bottom" :width="300" trigger="click">
+            <template #reference>
+              <el-button>
+                <el-icon><Setting /></el-icon>
+                导出设置
+              </el-button>
+            </template>
+            <div class="export-settings">
+              <h4>选择导出列</h4>
+              <el-checkbox-group v-model="exportColumns">
+                <el-checkbox v-for="col in availableExportColumns" :key="col.key" :label="col.key">
+                  {{ col.label }}
+                </el-checkbox>
+              </el-checkbox-group>
+              <el-divider />
+              <el-button size="small" @click="selectAllColumns">全选</el-button>
+              <el-button size="small" @click="deselectAllColumns">取消全选</el-button>
+            </div>
+          </el-popover>
+        </div>
+      </div>
       <el-table
+        ref="tableRef"
         :data="filteredTableData"
         v-loading="tableLoading"
         style="width: 100%"
         :default-sort="{ prop: sortState.prop, order: sortState.order || undefined }"
         @sort-change="handleSortChange"
+        @selection-change="handleSelectionChange"
+        @row-click="handleRowClick"
+        highlight-current-row
       >
+        <el-table-column type="selection" width="55" />
         <el-table-column prop="orderTime" label="时间" width="170">
           <template #default="{ row }">{{ formatDateTime(row.orderTime) }}</template>
         </el-table-column>
         <el-table-column prop="trackingNumber" label="运单号" width="160">
           <template #default="{ row }">
-            <span :style="styleFor(row, 'tracking')">{{ row.trackingNumber }}</span>
+            <span
+              :style="styleFor(row, 'tracking')"
+              class="copyable-cell"
+              @click.stop="copyText(row.trackingNumber)"
+              :title="row.trackingNumber ? '点击复制' : ''"
+            >{{ row.trackingNumber }}</span>
           </template>
         </el-table-column>
         <el-table-column prop="model" label="型号" width="160">
           <template #default="{ row }">
-            <span :style="styleFor(row, 'model')">{{ row.model }}</span>
+            <span
+              :style="styleFor(row, 'model')"
+              class="copyable-cell"
+              @click.stop="copyText(row.model)"
+              :title="row.model ? '点击复制' : ''"
+            >{{ row.model }}</span>
           </template>
         </el-table-column>
         <el-table-column prop="sn" label="SN" width="200">
           <template #default="{ row }">
-            <span class="sn-text" :style="styleFor(row, 'sn')">{{ row.sn }}</span>
+            <span
+              class="sn-text copyable-cell"
+              :style="styleFor(row, 'sn')"
+              @click.stop="copyText(row.sn)"
+              :title="row.sn ? '点击复制' : ''"
+            >{{ row.sn }}</span>
           </template>
         </el-table-column>
         <el-table-column prop="amount" label="金额" width="100">
@@ -319,14 +372,17 @@
             </span>
           </template>
           <template #default="{ row }">
-            <div>
-              <el-tag :type="statusTagType(row.status)">
-                {{ statusLabel(row.status) }}
-              </el-tag>
-              <div v-if="row.paidAt" class="paid-date">{{ formatDate(row.paidAt) }}</div>
-            </div>
+            <el-tag :type="statusTagType(row.status)">
+              {{ statusLabel(row.status) }}
+            </el-tag>
           </template>
         </el-table-column >
+        <el-table-column prop="statusChangedAt" label="最后更新时间" width="110">
+          <template #default="{ row }">
+            <span v-if="row.statusChangedAt">{{ formatDate(row.statusChangedAt) }}</span>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
         <el-table-column label="导入状态" width="140">
           <template #default="{ row }">
             <span v-if="row.imported" class="status-text">已录入系统</span>
@@ -358,7 +414,13 @@
       />
     </el-card>
 
-    <el-drawer v-model="createVisible" title="新增物流单" size="30%" :close-on-click-modal="false" :destroy-on-close="true">
+    <el-drawer
+      v-model="createVisible"
+      title="新增物流单"
+      size="30%"
+      :close-on-click-modal="false"
+      :destroy-on-close="true"
+    >
       <el-form ref="createFormRef" :model="createForm" :rules="createRules" label-width="90px">
         <el-form-item label="日期" prop="orderDate">
           <el-date-picker v-model="createForm.orderDate" type="date" value-format="YYYY-MM-DD" />
@@ -382,7 +444,13 @@
       </template>
     </el-drawer>
 
-    <el-dialog v-model="editDialog.visible" title="编辑物流单号" width="520px" :destroy-on-close="true">
+    <el-dialog
+      v-model="editDialog.visible"
+      title="编辑物流单号"
+      width="520px"
+      :destroy-on-close="true"
+      :close-on-click-modal="false"
+    >
       <el-form label-width="90px">
         <el-form-item label="运单号">
           <el-input v-model="editDialog.form.trackingNumber" />
@@ -442,7 +510,7 @@ export default {
 import { computed, reactive, ref, watch, onBeforeUnmount, onMounted, onActivated, onDeactivated } from 'vue';
 import type { FormInstance, FormRules } from 'element-plus';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { ArrowUp, Delete } from '@element-plus/icons-vue';
+import { ArrowUp, Delete, Download, Setting } from '@element-plus/icons-vue';
 import { fetchOrders, createOrder, importOrders, updateOrderStatus, searchOrders, fetchCategoryStats, updateOrder, deleteOrder } from '@/api/orders';
 import { listUsers } from '@/api/users';
 import { listOwnerUsernames } from '@/api/submissions';
@@ -585,6 +653,198 @@ const userOrders = ref<OrderRecord[]>([]);
 const total = ref(0);
 const loading = ref(false);
 
+// 表格引用和选中行
+const tableRef = ref();
+const selectedRows = ref<OrderRecord[]>([]);
+
+// 导出列配置
+const availableExportColumns = [
+  { key: 'id', label: 'ID' },
+  { key: 'orderTime', label: '时间' },
+  { key: 'trackingNumber', label: '运单号' },
+  { key: 'model', label: '型号' },
+  { key: 'sn', label: 'SN' },
+  { key: 'amount', label: '金额' },
+  { key: 'ownerUsername', label: '归属用户' },
+  { key: 'status', label: '状态' },
+  { key: 'statusChangedAt', label: '最后更新时间' },
+  { key: 'imported', label: '导入状态' },
+  { key: 'remark', label: '备注' },
+  { key: 'createdBy', label: '提交人' }
+];
+
+const exportColumns = ref<string[]>(['orderTime', 'trackingNumber', 'model', 'sn', 'amount', 'ownerUsername', 'status', 'statusChangedAt', 'remark', 'createdBy']);
+
+const selectAllColumns = () => {
+  exportColumns.value = availableExportColumns.map(col => col.key);
+};
+
+const deselectAllColumns = () => {
+  exportColumns.value = [];
+};
+
+const handleSelectionChange = (rows: OrderRecord[]) => {
+  selectedRows.value = rows;
+};
+
+// 点击行选中/取消选中
+const handleRowClick = (row: OrderRecord, column: any, event: Event) => {
+  // 如果点击的是编辑按钮或复选框本身，不处理
+  const target = event.target as HTMLElement;
+  if (target.closest('.el-button') || target.closest('.el-checkbox')) {
+    return;
+  }
+  
+  // 切换选中状态
+  tableRef.value?.toggleRowSelection(row);
+};
+
+// 导出 Excel 功能
+const handleExportExcel = async (mode: 'all' | 'selected') => {
+  let dataToExport: OrderRecord[] = [];
+  
+  if (mode === 'selected') {
+    if (!selectedRows.value.length) {
+      ElMessage.warning('请先选择要导出的数据');
+      return;
+    }
+    dataToExport = selectedRows.value;
+  } else {
+    // 全部导出：获取所有数据
+    ElMessage.info({ message: '正在准备导出数据...', duration: 2000 });
+    try {
+      dataToExport = await fetchAllOrders();
+    } catch (error) {
+      ElMessage.error('获取数据失败');
+      return;
+    }
+  }
+
+  if (!dataToExport.length) {
+    ElMessage.warning('没有可导出的数据');
+    return;
+  }
+
+  if (!exportColumns.value.length) {
+    ElMessage.warning('请至少选择一个导出列');
+    return;
+  }
+
+  // 构建表头
+  const headers = exportColumns.value.map(key => {
+    const col = availableExportColumns.find(c => c.key === key);
+    return col?.label || key;
+  });
+
+  // 构建数据行
+  const rows = dataToExport.map(record => {
+    return exportColumns.value.map(key => {
+      const value = (record as any)[key];
+      
+      // 特殊字段格式化
+      if (key === 'orderTime') {
+        return formatDateTime(value);
+      }
+      if (key === 'statusChangedAt') {
+        return value ? formatDate(value) : '-';
+      }
+      if (key === 'status') {
+        return statusLabel(value);
+      }
+      if (key === 'imported') {
+        return value ? '已录入系统' : '-';
+      }
+      if (key === 'amount') {
+        return value !== null && value !== undefined ? Number(value).toFixed(2) : '';
+      }
+      
+      return value ?? '';
+    });
+  });
+
+  // 创建工作表
+  const wsData = [headers, ...rows];
+  const ws = XLSX.utils.aoa_to_sheet(wsData);
+
+  // 设置列宽
+  const colWidths = exportColumns.value.map(key => {
+    const widthMap: Record<string, number> = {
+      id: 10,
+      orderTime: 20,
+      trackingNumber: 25,
+      model: 20,
+      sn: 25,
+      amount: 12,
+      ownerUsername: 15,
+      status: 12,
+      statusChangedAt: 15,
+      imported: 15,
+      remark: 30,
+      createdBy: 15
+    };
+    return { wch: widthMap[key] || 15 };
+  });
+  ws['!cols'] = colWidths;
+
+  // 设置单元格格式 - 居中对齐
+  const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
+  for (let R = range.s.r; R <= range.e.r; R++) {
+    for (let C = range.s.c; C <= range.e.c; C++) {
+      const cellAddress = XLSX.utils.encode_cell({ r: R, c: C });
+      if (!ws[cellAddress]) continue;
+      
+      // 设置单元格样式
+      ws[cellAddress].s = {
+        alignment: {
+          horizontal: 'center',
+          vertical: 'center',
+          wrapText: true
+        },
+        font: R === 0 ? { bold: true, sz: 12 } : { sz: 11 },
+        border: {
+          top: { style: 'thin', color: { rgb: '000000' } },
+          bottom: { style: 'thin', color: { rgb: '000000' } },
+          left: { style: 'thin', color: { rgb: '000000' } },
+          right: { style: 'thin', color: { rgb: '000000' } }
+        }
+      };
+      
+      // 表头特殊样式
+      if (R === 0) {
+        ws[cellAddress].s.fill = {
+          fgColor: { rgb: '4472C4' },
+          patternType: 'solid'
+        };
+        ws[cellAddress].s.font.color = { rgb: 'FFFFFF' };
+      }
+    }
+  }
+
+  // 设置行高
+  ws['!rows'] = [];
+  for (let R = range.s.r; R <= range.e.r; R++) {
+    ws['!rows'][R] = { hpt: R === 0 ? 25 : 20 };
+  }
+
+  // 创建工作簿
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '订单数据');
+
+  // 生成文件名
+  const timestamp = new Date().toISOString().slice(0, 10);
+  const filename = mode === 'selected' 
+    ? `订单数据-选中${dataToExport.length}条-${timestamp}.xlsx`
+    : `订单数据-全部${dataToExport.length}条-${timestamp}.xlsx`;
+
+  // 下载文件
+  XLSX.writeFile(wb, filename);
+
+  ElMessage.success({
+    message: `成功导出 ${dataToExport.length} 条数据`,
+    duration: 3000
+  });
+};
+
 // 差异提醒列表
 const diffNotices = ref<DiffNotice[]>([]); // UI显示用（最新200条）
 const diffNoticesAll = ref<DiffNotice[]>([]); // 完整列表（用于导出）
@@ -671,7 +931,6 @@ const loadDiffNoticesFromCache = () => {
 
     // 数据迁移：如果完整列表为空，但显示列表有数据，说明是旧版本数据
     if (allData.length === 0 && displayData.length > 0) {
-      console.log('🔄 检测到旧版本缓存数据，正在迁移...');
       // 从显示列表迁移到完整列表
       diffNoticesAll.value = displayData;
       diffNotices.value = displayData.slice(0, MAX_DIFF_NOTICES);
@@ -796,7 +1055,7 @@ const filteredTableData = computed(() => {
     });
     const duplicates = Array.from(snCounts.entries()).filter(([_, count]) => count > 1);
     if (duplicates.length > 0) {
-      console.log('🔍 发现重复的 SN:', duplicates);
+      // 发现重复 SN 时不再输出日志，避免控制台噪音
     }
   }
 
@@ -921,7 +1180,6 @@ const setStatusFilter = async (value: string) => {
     // 同步到表单筛选
     filters.status = quickStatus.value;
     filters.page = 1;
-    console.log('状态筛选变更:', quickStatus.value || '全部');
     // 立即执行搜索
     loadOrders();
   }
@@ -1082,26 +1340,49 @@ const triggerImport = () => {
 
 
 
-// 获取所有订单(不分页)
-const fetchAllOrders = async (): Promise<OrderRecord[]> => {
+// 获取所有订单（遵守后端每页最大1000条的限制并分页拉取）
+const fetchAllOrders = async (targetIds?: Set<number>): Promise<OrderRecord[]> => {
+  const all: OrderRecord[] = [];
+  const pageSize = 1000; // OrderController 会将 size>1000 回退为50，这里主动按上限分页
+  let page = 1;
+
+  // targetIds 用于差异比对时的早停：找到全部目标ID后即可退出分页请求
+  const needIds = targetIds ? new Set(Array.from(targetIds).filter(id => !!id)) : undefined;
+
   try {
-    const data = await fetchOrders({ page: 1, size: 999999 });
-    return data.records || [];
+    while (true) {
+      const data = await fetchOrders({ page, size: pageSize });
+      const records = data.records || [];
+      all.push(...records);
+
+      if (needIds) {
+        records.forEach(r => {
+          if (r.id && needIds.has(r.id)) {
+            needIds.delete(r.id);
+          }
+        });
+        if (needIds.size === 0) break; // 所有目标记录已获取，提前结束
+      }
+
+      if (records.length < pageSize) break; // 已到最后一页
+      page += 1;
+    }
   } catch (error) {
     console.error('Failed to fetch all orders:', error);
-    return [];
   }
+
+  return all;
 };
 
-// 按ID列表批量获取订单（优化：只获取需要的记录）
+// 按ID列表批量获取订单（分页拉取，避免被单页上限截断）
 const fetchOrdersByIds = async (ids: number[]): Promise<OrderRecord[]> => {
   if (!ids || ids.length === 0) return [];
 
+  const idSet = new Set(ids.filter(id => typeof id === 'number'));
+  if (idSet.size === 0) return [];
+
   try {
-    // 使用批量查询接口（假设后端支持，如果不支持则降级到逐个查询）
-    // 这里简化实现：通过多次分页查询获取指定ID的记录
-    const allOrders = await fetchAllOrders();
-    const idSet = new Set(ids);
+    const allOrders = await fetchAllOrders(idSet);
     return allOrders.filter(order => order.id && idSet.has(order.id));
   } catch (error) {
     console.error('Failed to fetch orders by IDs:', error);
@@ -1449,7 +1730,6 @@ const handleFileChange = async (event: Event) => {
     // 判断是否为首次导入（数据库为空）
     if (prevSnapshot.size === 0) {
       isFirstImport = true;
-      console.log('📦 检测到数据库为空，这是首次导入，跳过差异对比');
     } else {
       // 只在非首次导入时显示准备对比的提示
       ElMessage.info({
@@ -1535,7 +1815,6 @@ const handleFileChange = async (event: Event) => {
     // 由于后端已改为保留Excel中的ID，这段代码通常不会被触发
     // 如果触发，说明用户填写了新的ID（正常情况），不需要警告
     if (!isFirstImport && Array.isArray(report?.invalidIds) && report.invalidIds.length > 0) {
-      console.log(`📝 检测到 ${report.invalidIds.length} 个新ID，已作为新记录插入`);
       // 不再显示警告和差异提醒，因为这是用户主动填写的新ID
     }
 
@@ -1552,17 +1831,7 @@ const handleFileChange = async (event: Event) => {
     const changedIds: number[] = report?.changedIds || [];
 
     // 🔍 调试日志：检查差异计算条件
-    console.log('🔍 差异计算条件检查:', {
-      isFirstImport,
-      hasSnapshot: !!prevSnapshot,
-      snapshotSize: prevSnapshot?.size || 0,
-      hasRealChanges,
-      imported,
-      deletedCount: report?.deletedRecords?.length || 0,
-      invalidIdsCount: report?.invalidIds?.length || 0,
-      changedIdsCount: changedIds.length,
-      changedIds: changedIds.slice(0, 10) // 只显示前10个
-    });
+    // 调试信息已移除，避免控制台噪音
 
     // 异步计算差异（仅在非首次导入、有快照且有实质性变化时）
     if (!isFirstImport && prevSnapshot && prevSnapshot.size > 0 && hasRealChanges && changedIds.length > 0) {
@@ -1579,7 +1848,7 @@ const handleFileChange = async (event: Event) => {
       }
     } else if (!isFirstImport && !hasRealChanges) {
       // 如果没有实质性变化，提示用户
-      console.log('📋 后端检测到数据未变化，跳过差异计算');
+      // 后端检测到数据未变化，跳过差异计算
     }
 
     // 记录本次导入时间戳
@@ -1730,6 +1999,14 @@ const formatDate = (value?: string) => {
   return value.substring(0, 10);
 };
 
+// 复制文本到剪贴板
+const copyText = (text?: string) => {
+  if (!text) return;
+  navigator.clipboard.writeText(text).then(() => {
+    ElMessage.success('已复制');
+  });
+};
+
 const buildOrderSnapshot = (list: OrderRecord[]) => {
   // 使用 ID 作为 key，这样即使运单号、SN等所有字段都改了，也能通过ID匹配到同一条记录
   const map = new Map<number, Partial<OrderRecord>>();
@@ -1820,7 +2097,7 @@ const computeDifferences = (prevMap: Map<number, Partial<OrderRecord>>, nextList
   };
 
   // 遍历新记录，通过ID匹配旧记录
-  console.log('🔍 开始对比差异，nextList 数量:', nextList.length, 'prevMap 数量:', prevMap.size);
+  // 开始对比差异
 
   nextList.forEach(order => {
     if (!order.id) {
@@ -1838,7 +2115,7 @@ const computeDifferences = (prevMap: Map<number, Partial<OrderRecord>>, nextList
       // 中文记录如果组合键匹配不到，说明是新增的（不报新增提醒，因为中文记录每次导入都是新ID）
       if (isChinese) return;
       // 新增的记录
-      console.log('🆕 发现新增记录 ID=' + order.id + ', 运单号=' + order.trackingNumber);
+      // 新增记录提示已移除日志
       notices.push({
         trackingNumber: order.trackingNumber || `ID-${order.id}`,
         message: '🆕 新增记录',
@@ -1926,7 +2203,7 @@ const computeDifferences = (prevMap: Map<number, Partial<OrderRecord>>, nextList
     }
   });
 
-  console.log('📊 对比完成，发现 ' + notices.length + ' 条差异');
+  // 对比完成
 
   // 过滤已确认的变更（避免重复提醒）
   const filteredNotices = notices.filter(notice => {
@@ -2016,7 +2293,7 @@ const computeDifferences = (prevMap: Map<number, Partial<OrderRecord>>, nextList
     return hasUnacknowledgedChange;
   });
 
-  console.log('📊 过滤后剩余 ' + filteredNotices.length + ' 条差异（已确认的变更被过滤）');
+  // 过滤后保留的差异
   if (notices.length > filteredNotices.length) {
     console.warn('⚠️ 有 ' + (notices.length - filteredNotices.length) + ' 条变更因已确认而被过滤');
   }
@@ -2605,7 +2882,7 @@ const handleSortChange = (options: { prop: string; order: SortOrder }) => {
       nextStatus = ''; // 已打款 → 全部
     }
 
-    console.log('🔄 状态列循环筛选:', filters.status || '全部', '→', nextStatus || '全部');
+    // 状态列循环筛选
 
     // 更新筛选状态
     quickStatus.value = nextStatus;
@@ -2848,6 +3125,12 @@ onBeforeUnmount(() => {
   margin-top: 2px;
 }
 
+.status-changed-date {
+  font-size: 11px;
+  color: #909399;
+  margin-top: 2px;
+}
+
 :deep(.el-table) {
   color: #0a0a0a;
 }
@@ -2888,6 +3171,15 @@ onBeforeUnmount(() => {
 
 .sn-text {
   display: inline-block;
+}
+
+.copyable-cell {
+  cursor: pointer;
+}
+
+.copyable-cell:hover {
+  color: #409eff;
+  text-decoration: underline;
 }
 
 .sn-duplicate {
@@ -3318,5 +3610,72 @@ onBeforeUnmount(() => {
   font-size: 13px;
   border-radius: 3px;
   cursor: help;
+}
+
+/* 表格工具栏 */
+.table-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  padding: 12px 16px;
+  background: #f8fafc;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+}
+
+.toolbar-left {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.toolbar-right {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+/* 导出设置弹窗 */
+.export-settings {
+  padding: 8px 0;
+}
+
+.export-settings h4 {
+  margin: 0 0 12px 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #374151;
+}
+
+.export-settings .el-checkbox-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.export-settings .el-checkbox {
+  margin-right: 0;
+}
+
+.export-settings .el-divider {
+  margin: 12px 0;
+}
+
+.export-settings .el-button {
+  margin-right: 8px;
+}
+
+/* 表格行可点击样式 */
+:deep(.el-table__body tr) {
+  cursor: pointer;
+}
+
+:deep(.el-table__body tr:hover) {
+  background-color: #ecf5ff !important;
+}
+
+:deep(.el-table__body tr.current-row) {
+  background-color: #e6f7ff !important;
 }
 </style>

@@ -25,6 +25,7 @@ public class OrderRecord {
     private String remark;
     private String category;
     private String status;
+    private LocalDateTime statusChangedAt;
     private LocalDateTime paidAt;
     private BigDecimal amount;
     private String currency;

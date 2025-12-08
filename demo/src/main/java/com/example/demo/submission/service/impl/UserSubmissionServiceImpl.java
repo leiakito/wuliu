@@ -52,8 +52,9 @@ public class UserSubmissionServiceImpl implements UserSubmissionService {
         String submitter = normalizeUsername(operator);
         String owner = normalizeUsername(ownerUsername);
         String rawContent = request.getTrackingNumber();
-        String trackingNumber = resolveTrackingNumber(rawContent);
-        UserSubmission submission = createSingleSubmission(trackingNumber, submitter, owner);
+        LocalDate orderDate = request.getOrderDate();
+        String trackingNumber = resolveTrackingNumber(rawContent, orderDate);
+        UserSubmission submission = createSingleSubmission(trackingNumber, submitter, owner, orderDate);
         userSubmissionLogService.record(submitter, rawContent);
         return submission;
     }
@@ -63,8 +64,9 @@ public class UserSubmissionServiceImpl implements UserSubmissionService {
     public List<UserSubmission> batchCreate(UserSubmissionBatchRequest request, String operator, String ownerUsername) {
         String submitter = normalizeUsername(operator);
         String owner = normalizeUsername(ownerUsername);
+        LocalDate orderDate = request.getOrderDate();
         LinkedHashSet<String> sanitized = request.getTrackingNumbers().stream()
-            .map(this::resolveTrackingNumber)
+            .map(raw -> resolveTrackingNumber(raw, orderDate))
             .filter(StringUtils::hasText)
             .collect(Collectors.toCollection(LinkedHashSet::new));
         if (sanitized.isEmpty()) {
@@ -73,7 +75,7 @@ public class UserSubmissionServiceImpl implements UserSubmissionService {
         userSubmissionLogService.record(submitter, request.getRawContent());
         List<UserSubmission> submissions = new ArrayList<>();
         for (String trackingNumber : sanitized) {
-            submissions.add(createSingleSubmission(trackingNumber, submitter, owner));
+            submissions.add(createSingleSubmission(trackingNumber, submitter, owner, orderDate));
         }
         return submissions;
     }
@@ -144,12 +146,21 @@ public class UserSubmissionServiceImpl implements UserSubmissionService {
         }
     }
 
-    private void syncSettlement(String trackingNumber) {
+    private void syncSettlement(String trackingNumber, LocalDate orderDate) {
         if (!StringUtils.hasText(trackingNumber)) {
             return;
         }
         // 查询所有匹配的订单(包括UNPAID状态的)
-        List<OrderRecord> orders = orderService.findByTracking(List.of(trackingNumber));
+        List<OrderRecord> orders;
+        if (orderDate != null) {
+            // 如果指定了日期，只查询该日期的订单
+            LambdaQueryWrapper<OrderRecord> wrapper = new LambdaQueryWrapper<>();
+            wrapper.eq(OrderRecord::getTrackingNumber, trackingNumber.trim())
+                .eq(OrderRecord::getOrderDate, orderDate);
+            orders = orderRecordMapper.selectList(wrapper);
+        } else {
+            orders = orderService.findByTracking(List.of(trackingNumber));
+        }
         if (orders.isEmpty()) {
             return;
         }
@@ -157,12 +168,16 @@ public class UserSubmissionServiceImpl implements UserSubmissionService {
         settlementService.createPending(orders, true);
     }
 
-    private void setAmountFromOrder(UserSubmission submission) {
+    private void setAmountFromOrder(UserSubmission submission, LocalDate orderDate) {
         if (submission.getTrackingNumber() == null) {
             return;
         }
         LambdaQueryWrapper<OrderRecord> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(OrderRecord::getTrackingNumber, submission.getTrackingNumber().trim());
+        // 如果指定了日期，按日期筛选
+        if (orderDate != null) {
+            wrapper.eq(OrderRecord::getOrderDate, orderDate);
+        }
         wrapper.orderByDesc(OrderRecord::getCreatedAt).last("LIMIT 1");
         OrderRecord order = orderRecordMapper.selectOne(wrapper);
         if (order != null && order.getAmount() != null) {
@@ -198,20 +213,31 @@ public class UserSubmissionServiceImpl implements UserSubmissionService {
         });
     }
 
-    private void ensureNotSubmitted(String trackingNumber) {
+    private void ensureNotSubmitted(String trackingNumber, LocalDate orderDate) {
         if (!StringUtils.hasText(trackingNumber)) {
             return;
         }
         LambdaQueryWrapper<UserSubmission> exists = new LambdaQueryWrapper<>();
         exists.eq(UserSubmission::getTrackingNumber, trackingNumber);
+        // 如果指定了日期，则只检查同日期的提交
+        if (orderDate != null) {
+            exists.eq(UserSubmission::getOrderDate, orderDate);
+        }
         if (userSubmissionMapper.selectCount(exists) > 0) {
-            throw new BusinessException(ErrorCode.BAD_REQUEST, "该单号已被提交，请勿重复提交");
+            String msg = orderDate != null
+                ? "该单号在 " + orderDate + " 已被提交，请勿重复提交"
+                : "该单号已被提交，请勿重复提交";
+            throw new BusinessException(ErrorCode.BAD_REQUEST, msg);
         }
     }
 
-    private boolean isSubmitted(String trackingNumber) {
+    private boolean isSubmitted(String trackingNumber, LocalDate orderDate) {
         LambdaQueryWrapper<UserSubmission> exists = new LambdaQueryWrapper<>();
         exists.eq(UserSubmission::getTrackingNumber, trackingNumber);
+        // 如果指定了日期，则检查同日期的提交
+        if (orderDate != null) {
+            exists.eq(UserSubmission::getOrderDate, orderDate);
+        }
         return userSubmissionMapper.selectCount(exists) > 0;
     }
 
@@ -231,20 +257,20 @@ public class UserSubmissionServiceImpl implements UserSubmissionService {
         return cleaned;
     }
 
-    private String resolveTrackingNumber(String raw) {
+    private String resolveTrackingNumber(String raw, LocalDate orderDate) {
         String normalized = normalizeTracking(raw);
-        // 1) 完全匹配
-        OrderRecord exact = findOrder(normalized);
+        // 1) 完全匹配（如果有日期则按日期筛选）
+        OrderRecord exact = findOrder(normalized, orderDate);
         if (exact != null && StringUtils.hasText(exact.getTrackingNumber())) {
             return exact.getTrackingNumber().trim();
         }
         // 2) 按前缀模糊匹配 JD 尾缀：PREFIX-1-1
         String prefix = normalized.replaceAll("-+$", "");
-        List<OrderRecord> candidates = findOrdersByPrefix(prefix);
+        List<OrderRecord> candidates = findOrdersByPrefix(prefix, orderDate);
         if (!candidates.isEmpty()) {
             for (OrderRecord candidate : candidates) {
                 String number = candidate.getTrackingNumber();
-                if (StringUtils.hasText(number) && !isSubmitted(number.trim())) {
+                if (StringUtils.hasText(number) && !isSubmitted(number.trim(), orderDate)) {
                     return number.trim();
                 }
             }
@@ -257,32 +283,40 @@ public class UserSubmissionServiceImpl implements UserSubmissionService {
         return normalized;
     }
 
-    private OrderRecord findOrder(String trackingNumber) {
+    private OrderRecord findOrder(String trackingNumber, LocalDate orderDate) {
         if (!StringUtils.hasText(trackingNumber)) {
             return null;
         }
         LambdaQueryWrapper<OrderRecord> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(OrderRecord::getTrackingNumber, trackingNumber.trim())
-            .orderByDesc(OrderRecord::getOrderTime)
+        wrapper.eq(OrderRecord::getTrackingNumber, trackingNumber.trim());
+        // 如果指定了日期，则按日期筛选
+        if (orderDate != null) {
+            wrapper.eq(OrderRecord::getOrderDate, orderDate);
+        }
+        wrapper.orderByDesc(OrderRecord::getOrderTime)
             .orderByDesc(OrderRecord::getCreatedAt)
             .last("LIMIT 1");
         return orderRecordMapper.selectOne(wrapper);
     }
 
-    private List<OrderRecord> findOrdersByPrefix(String prefix) {
+    private List<OrderRecord> findOrdersByPrefix(String prefix, LocalDate orderDate) {
         if (!StringUtils.hasText(prefix) || prefix.length() < 6) {
             return List.of();
         }
         LambdaQueryWrapper<OrderRecord> wrapper = new LambdaQueryWrapper<>();
-        wrapper.likeRight(OrderRecord::getTrackingNumber, prefix + "-")
-            .orderByDesc(OrderRecord::getOrderTime)
+        wrapper.likeRight(OrderRecord::getTrackingNumber, prefix + "-");
+        // 如果指定了日期，则按日期筛选
+        if (orderDate != null) {
+            wrapper.eq(OrderRecord::getOrderDate, orderDate);
+        }
+        wrapper.orderByDesc(OrderRecord::getOrderTime)
             .orderByDesc(OrderRecord::getCreatedAt)
             .orderByAsc(OrderRecord::getTrackingNumber)
             .last("LIMIT 20");
         return orderRecordMapper.selectList(wrapper);
     }
 
-    private UserSubmission createSingleSubmission(String trackingNumber, String submitter, String ownerUsername) {
+    private UserSubmission createSingleSubmission(String trackingNumber, String submitter, String ownerUsername, LocalDate orderDate) {
         if (!StringUtils.hasText(trackingNumber)) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "单号不能为空");
         }
@@ -295,13 +329,20 @@ public class UserSubmissionServiceImpl implements UserSubmissionService {
         String normalized = trackingNumber.trim();
 
         // Check if tracking number contains Chinese characters
-        // Chinese tracking numbers (like "七月", "跑腿") can be submitted multiple times
-        // English/numeric tracking numbers still maintain uniqueness
+        // Chinese tracking numbers (like "七月", "跑腿") can be submitted multiple times on different dates
+        // English/numeric tracking numbers still maintain uniqueness (unless orderDate is specified)
         boolean containsChinese = normalized.matches(".*[\u4e00-\u9fa5]+.*");
 
-        // Only check for duplicates if NOT Chinese tracking number
-        if (!containsChinese) {
-            ensureNotSubmitted(normalized);
+        // 对于中文单号，如果指定了日期，则按 单号+日期 组合检查重复
+        // 对于非中文单号，如果指定了日期，也按 单号+日期 检查；否则按单号检查
+        if (containsChinese) {
+            // 中文单号必须指定日期才能检查重复，否则允许重复提交
+            if (orderDate != null) {
+                ensureNotSubmitted(normalized, orderDate);
+            }
+        } else {
+            // 非中文单号：按 单号+日期（如果有）检查重复
+            ensureNotSubmitted(normalized, orderDate);
         }
 
         // 将归属关系存入 JSON 文件
@@ -313,9 +354,10 @@ public class UserSubmissionServiceImpl implements UserSubmissionService {
         submission.setTrackingNumber(normalized);
         submission.setStatus(DEFAULT_STATUS);
         submission.setSubmissionDate(LocalDate.now());
-        setAmountFromOrder(submission);
+        submission.setOrderDate(orderDate);
+        setAmountFromOrder(submission, orderDate);
         userSubmissionMapper.insert(submission);
-        syncSettlement(normalized);
+        syncSettlement(normalized, orderDate);
         return submission;
     }
 

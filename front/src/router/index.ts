@@ -139,24 +139,10 @@ router.beforeEach((to, from, next) => {
   const roles = to.meta.roles as string[] | undefined;
   const userRole = auth.user?.role ?? '';
 
-  // 调试信息 - 强制输出
-  console.log('=== 路由守卫开始 ===');
-  console.log('[路由守卫] 目标路由:', to.path, to.name);
-  console.log('[路由守卫] 完整 meta:', to.meta);
-  console.log('[路由守卫] 需要角色:', roles);
-  console.log('[路由守卫] 用户角色:', userRole);
-  console.log('[路由守卫] 完整用户信息:', JSON.stringify(auth.user));
-  console.log('[路由守卫] 角色匹配检查:', roles ? `roles.includes('${userRole}') = ${roles.includes(userRole)}` : '无角色限制');
-
   if (roles && !roles.includes(userRole)) {
-    console.error('[路由守卫] ❌ 权限不足！重定向到 dashboard');
-    console.error('[路由守卫] 需要的角色:', roles);
-    console.error('[路由守卫] 用户的角色:', userRole);
     next({ path: '/dashboard' });
     return;
   }
-
-  console.log('[路由守卫] ✅ 权限检查通过，允许访问');
   next();
 });
 

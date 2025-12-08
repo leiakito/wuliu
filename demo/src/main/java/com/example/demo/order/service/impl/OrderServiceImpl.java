@@ -353,14 +353,8 @@ public class OrderServiceImpl implements OrderService {
         OrderRecord dbLatest = null;
         List<OrderCellStyle> dbStyles = null;
 
-        log.info("🔍 检测变更开始: tracking={}, sn={}, remark={}, model={}",
-                r.getTrackingNumber(), r.getSn(), r.getRemark(), r.getModel());
-        log.info("🔍 Excel样式原始值: trackingBg={}, modelBg={}, snBg={}, remarkBg={}, amountBg={}",
-                r.getTrackingBgColor(), r.getModelBgColor(), r.getSnBgColor(), r.getRemarkBgColor(), r.getAmountBgColor());
-
         // 如果 SN 或物流单号包含中文，不做匹配，直接作为新记录插入
         boolean containsChinese = containsChinese(r.getSn()) || containsChinese(r.getTrackingNumber());
-        log.info("🔍 包含中文: {}", containsChinese);
 
         if (!containsChinese && StringUtils.hasText(r.getSn()) && StringUtils.hasText(r.getTrackingNumber())) {
             LambdaQueryWrapper<OrderRecord> wrapper = new LambdaQueryWrapper<>();
@@ -383,17 +377,6 @@ public class OrderServiceImpl implements OrderService {
 
         // 2. 如果数据库中存在记录，进行比较
         if (dbLatest != null) {
-            log.info("🔍 找到数据库记录: id={}, tracking={}, sn={}, remark={}",
-                    dbLatest.getId(), dbLatest.getTrackingNumber(), dbLatest.getSn(), dbLatest.getRemark());
-            // 输出数据库中存储的样式
-            if (dbStyles != null && !dbStyles.isEmpty()) {
-                for (OrderCellStyle style : dbStyles) {
-                    log.info("🔍 数据库样式[{}]: bg={}, font={}, strike={}, bold={}",
-                            style.getField(), style.getBgColor(), style.getFontColor(), style.getStrike(), style.getBold());
-                }
-            } else {
-                log.info("🔍 数据库中无样式记录");
-            }
             Map<String, CellStyleSnap> curStyle = buildStyleMap(r);
             Map<String, String> curValue = buildValueMap(r);
 
@@ -418,30 +401,8 @@ public class OrderServiceImpl implements OrderService {
                 if (styleChanged || valueChanged) {
                     changed = true;
                     changedField = f;
-                    log.info("🔍 字段 {} 发生变化: 值[{} -> {}], 样式bg[{} -> {}], 样式font[{} -> {}]",
-                            f, va, vb,
-                            a == null ? null : a.getBg(), b == null ? null : b.getBg(),
-                            a == null ? null : a.getFont(), b == null ? null : b.getFont());
                     break;
                 }
-            }
-
-            if (!changed) {
-                // 详细日志：显示所有字段的比较值
-                log.info("🔍 与数据库比较: 无变化。详细比较:");
-                for (String f : order) {
-                    CellStyleSnap a = dbStyleMap.get(f);
-                    CellStyleSnap b = curStyle.get(f);
-                    String va = dbValueMap.get(f);
-                    String vb = curValue.get(f);
-                    log.info("  字段[{}]: 值[db={}, excel={}], bg[db={}, excel={}], font[db={}, excel={}], strike[db={}, excel={}]",
-                            f, va, vb,
-                            a == null ? null : a.getBg(), b == null ? null : b.getBg(),
-                            a == null ? null : a.getFont(), b == null ? null : b.getFont(),
-                            a == null ? Boolean.FALSE : a.getStrike(), b == null ? Boolean.FALSE : b.getStrike());
-                }
-            } else {
-                log.info("🔍 与数据库比较: 检测到变化, 字段={}", changedField);
             }
 
             // 仍然更新内存快照（用于会话内的快速比较）
@@ -460,7 +421,6 @@ public class OrderServiceImpl implements OrderService {
         }
 
         // 3. 数据库中不存在，视为首次出现，返回 true（有变化）
-        log.info("🔍 数据库中未找到匹配记录，视为新记录: tracking={}, sn={}", r.getTrackingNumber(), r.getSn());
         String key = styleKey(r);
         Map<String, CellStyleSnap> curStyle = buildStyleMap(r);
         Map<String, String> curValue = buildValueMap(r);
@@ -501,14 +461,30 @@ public class OrderServiceImpl implements OrderService {
                     .map(String::trim)
                     .collect(Collectors.toSet());
 
-            // 预加载数据库中相关记录
+            // 预加载数据库中相关记录，并一次性批量加载样式，避免导入时 N+1 查询
             Map<String, List<OrderRecord>> dbRecordsByKey = new HashMap<>();
             Map<String, Integer> matchCounterByKey = new HashMap<>();  // 每个key已匹配的计数
+            Map<Long, List<OrderCellStyle>> stylesByOrderId = new HashMap<>();
             if (!allTrackingNumbers.isEmpty()) {
                 LambdaQueryWrapper<OrderRecord> preloadWrapper = new LambdaQueryWrapper<>();
                 preloadWrapper.in(OrderRecord::getTrackingNumber, allTrackingNumbers)
                         .orderByAsc(OrderRecord::getId);  // 按ID升序，保证顺序稳定
                 List<OrderRecord> dbRecords = orderRecordMapper.selectList(preloadWrapper);
+
+                // 批量加载样式，按 orderId 分组缓存
+                List<Long> preloadIds = dbRecords.stream()
+                        .map(OrderRecord::getId)
+                        .filter(Objects::nonNull)
+                        .toList();
+                if (!preloadIds.isEmpty()) {
+                    List<OrderCellStyle> preloadStyles = orderCellStyleMapper.selectList(
+                            new QueryWrapper<OrderCellStyle>().lambda().in(OrderCellStyle::getOrderId, preloadIds)
+                    );
+                    Map<Long, List<OrderCellStyle>> grouped = preloadStyles.stream()
+                            .collect(Collectors.groupingBy(OrderCellStyle::getOrderId));
+                    stylesByOrderId.putAll(grouped);
+                }
+
                 // 按 tracking_number + sn + model 分组
                 for (OrderRecord db : dbRecords) {
                     String key = buildMatchKey(db.getTrackingNumber(), db.getSn(), db.getModel());
@@ -525,7 +501,7 @@ public class OrderServiceImpl implements OrderService {
                     record.setCategory(TrackingCategoryUtil.resolve(record.getTrackingNumber()));
                 }
                 // 调用变更检测,这会通过顺序匹配设置record的ID，并返回是否变化
-                boolean changed = isChangedAndUpdateBaselineWithPreload(record, operator, dbRecordsByKey, matchCounterByKey);
+                boolean changed = isChangedAndUpdateBaselineWithPreload(record, operator, dbRecordsByKey, matchCounterByKey, stylesByOrderId);
                 changeResults.put(record, changed);
             }
 
@@ -627,7 +603,7 @@ public class OrderServiceImpl implements OrderService {
             key = "'page1:' + #request.size + ':' + #request.startDate + ':' + #request.endDate + ':' + #request.category + ':' + #request.status + ':' + #request.keyword + ':' + #request.ownerUsername + ':' + #request.sortBy + ':' + #request.sortOrder",
             condition = "#request.page == 1")
     public IPage<OrderRecord> query(OrderFilterRequest request) {
-        System.out.println("🔍 OrderService.query 收到请求: keyword=" + request.getKeyword());
+        // 查询日志去除，减少控制台输出
         Page<OrderRecord> page = Page.of(request.getPage(), request.getSize());
         LambdaQueryWrapper<OrderRecord> wrapper = new LambdaQueryWrapper<>();
 
@@ -648,22 +624,12 @@ public class OrderServiceImpl implements OrderService {
 
             // 检测是否包含中文字符
             boolean hasChinese = keyword.chars().anyMatch(ch -> Character.UnicodeBlock.of(ch) == Character.UnicodeBlock.CJK_UNIFIED_IDEOGRAPHS);
-            System.out.println("🔍 关键字: " + keyword + ", 包含中文: " + hasChinese);
-
-            // 检测是否为运单号格式（包含 - 符号）
-            // 运单号格式如: JDX045395221407-1-1, SF2034401724303
-            // 全文索引会把 - 当作分隔符，导致无法精确匹配，需使用 LIKE
-            // 全文索引对中文支持不好，包含中文也使用 LIKE
+            // 根据关键字类型选择查询方式（内部调试日志已移除）
             if (keyword.contains("-") || hasChinese) {
-                System.out.println("🔍 使用 LIKE 查询（中文或包含-）");
-                // 对于包含 - 或中文的关键字，使用 LIKE 精确查询
                 wrapper.and(w -> w.like(OrderRecord::getTrackingNumber, keyword)
                         .or().like(OrderRecord::getSn, keyword)
                         .or().like(OrderRecord::getModel, keyword));
             } else {
-                System.out.println("🔍 使用全文索引查询");
-                // 其他关键字使用全文索引进行搜索，性能更高
-                // 在布尔模式下，+ 表示必须包含，* 是通配符
                 String booleanModeKeyword = Arrays.stream(keyword.split("\\s+"))
                         .filter(s -> !s.isEmpty())
                         .map(s -> "+" + s + "*")
@@ -764,17 +730,10 @@ public class OrderServiceImpl implements OrderService {
         }
 
         IPage<OrderRecord> result = orderRecordMapper.selectPage(page, wrapper);
-        System.out.println("🔍 查询结果: 共 " + result.getRecords().size() + " 条记录");
-        if (result.getRecords().size() > 0) {
-            System.out.println("🔍 第一条记录: trackingNumber=" + result.getRecords().get(0).getTrackingNumber() + ", sn=" + result.getRecords().get(0).getSn());
-        }
-
         // 关联查询归属用户信息
         attachOwnerInfo(result.getRecords());
         // 回填持久化样式
         attachStyles(result.getRecords());
-
-        System.out.println("🔍 最终返回: 共 " + result.getRecords().size() + " 条记录");
         return result;
     }
 
@@ -922,13 +881,11 @@ public class OrderServiceImpl implements OrderService {
             OrderRecord r,
             String operator,
             Map<String, List<OrderRecord>> dbRecordsByKey,
-            Map<String, Integer> matchCounterByKey) {
+            Map<String, Integer> matchCounterByKey,
+            Map<Long, List<OrderCellStyle>> stylesByOrderId) {
 
         Snapshot s = snaps(operator);
         String matchKey = buildMatchKey(r.getTrackingNumber(), r.getSn(), r.getModel());
-
-        log.info("🔍 检测变更开始: tracking={}, sn={}, model={}, matchKey={}",
-                r.getTrackingNumber(), r.getSn(), r.getModel(), matchKey);
 
         // 从预加载数据中按顺序获取匹配的数据库记录
         OrderRecord dbLatest = null;
@@ -943,23 +900,12 @@ public class OrderServiceImpl implements OrderService {
                 matchCounterByKey.put(matchKey, matchIndex + 1);
 
                 r.setId(dbLatest.getId());
-                dbStyles = orderCellStyleMapper.selectList(
-                        new QueryWrapper<OrderCellStyle>().lambda()
-                                .eq(OrderCellStyle::getOrderId, dbLatest.getId())
-                );
-                log.info("🔍 顺序匹配成功: matchKey={}, matchIndex={}, dbId={}", matchKey, matchIndex, dbLatest.getId());
-            } else {
-                log.info("🔍 候选记录已用尽: matchKey={}, candidates.size={}, 需要新建", matchKey, candidates.size());
+                dbStyles = stylesByOrderId.get(dbLatest.getId());
             }
-        } else {
-            log.info("🔍 无候选记录: matchKey={}, 需要新建", matchKey);
         }
 
         // 如果找到匹配的数据库记录，进行比较
         if (dbLatest != null) {
-            log.info("🔍 找到数据库记录: id={}, tracking={}, sn={}, model={}",
-                    dbLatest.getId(), dbLatest.getTrackingNumber(), dbLatest.getSn(), dbLatest.getModel());
-
             Map<String, CellStyleSnap> curStyle = buildStyleMap(r);
             Map<String, String> curValue = buildValueMap(r);
             Map<String, CellStyleSnap> dbStyleMap = buildStyleMapFromDb(dbLatest, dbStyles);
@@ -980,13 +926,8 @@ public class OrderServiceImpl implements OrderService {
                 boolean valueChanged = !Objects.equals(va, vb);
                 if (styleChanged || valueChanged) {
                     changed = true;
-                    log.info("🔍 字段 {} 发生变化: 值[{} -> {}]", f, va, vb);
                     break;
                 }
-            }
-
-            if (!changed) {
-                log.info("🔍 与数据库比较: 无变化");
             }
 
             // 更新内存快照
@@ -1005,9 +946,6 @@ public class OrderServiceImpl implements OrderService {
         }
 
         // 数据库中不存在，视为新记录
-        log.info("🔍 数据库中未找到匹配记录，视为新记录: tracking={}, sn={}, model={}",
-                r.getTrackingNumber(), r.getSn(), r.getModel());
-
         String key = styleKey(r);
         Map<String, CellStyleSnap> curStyle = buildStyleMap(r);
         Map<String, String> curValue = buildValueMap(r);
@@ -1246,6 +1184,8 @@ public class OrderServiceImpl implements OrderService {
             throw new BusinessException(ErrorCode.NOT_FOUND, "订单不存在");
         }
         record.setStatus(status);
+        // 记录状态变更时间
+        record.setStatusChangedAt(LocalDateTime.now());
         int updated = orderRecordMapper.updateById(record);
         if (updated == 0) {
             throw new BusinessException(ErrorCode.OPTIMISTIC_LOCK_CONFLICT);
@@ -1413,7 +1353,11 @@ public class OrderServiceImpl implements OrderService {
         }
         if (StringUtils.hasText(request.getStatus())) {
             String newStatus = request.getStatus();
-            record.setStatus(newStatus);
+            String oldStatus = record.getStatus();
+            // 状态改变时更新状态
+            if (!Objects.equals(oldStatus, newStatus)) {
+                record.setStatus(newStatus);
+            }
             // 状态变为PAID时记录打款时间
             if ("PAID".equals(newStatus) && record.getPaidAt() == null) {
                 record.setPaidAt(LocalDateTime.now());
@@ -1425,6 +1369,8 @@ public class OrderServiceImpl implements OrderService {
             record.setRemark(request.getRemark());
         }
         record.setCurrency("CNY");
+        // 任何编辑操作都更新最后更新时间
+        record.setStatusChangedAt(LocalDateTime.now());
         int updated = orderRecordMapper.updateById(record);
         if (updated == 0) {
             throw new BusinessException(ErrorCode.OPTIMISTIC_LOCK_CONFLICT);
@@ -1479,7 +1425,7 @@ public class OrderServiceImpl implements OrderService {
         OrderRecord existing = orderRecordMapper.selectById(incoming.getId());
         if (existing == null) {
             // 记录不存在，清空ID，改为插入新记录
-            System.out.println("警告: ID=" + incoming.getId() + " 的记录不存在于数据库，将作为新记录插入");
+            log.warn("ID={} 的记录不存在于数据库，将作为新记录插入", incoming.getId());
             incoming.setId(null);
             insertDirectly(incoming);
             return;
@@ -1519,15 +1465,12 @@ public class OrderServiceImpl implements OrderService {
         try {
             int updatedRows = orderRecordMapper.updateById(incoming);
             if (updatedRows == 0) {
-                System.err.println("警告: 更新记录失败，没有行被更新。ID=" + incoming.getId() +
-                        ", trackingNumber=" + incoming.getTrackingNumber() +
-                        ", sn=" + incoming.getSn());
+                log.warn("更新记录失败，没有行被更新。ID={}, trackingNumber={}, sn={}",
+                        incoming.getId(), incoming.getTrackingNumber(), incoming.getSn());
             }
         } catch (Exception e) {
-            System.err.println("警告: 更新记录时发生异常，ID=" + incoming.getId() +
-                    ", trackingNumber=" + incoming.getTrackingNumber() +
-                    ", sn=" + incoming.getSn() +
-                    ", 错误: " + e.getMessage());
+            log.warn("更新记录时发生异常，ID={}, trackingNumber={}, sn={}, 错误: {}",
+                    incoming.getId(), incoming.getTrackingNumber(), incoming.getSn(), e.getMessage());
             throw e;
         }
     }
@@ -1575,10 +1518,8 @@ public class OrderServiceImpl implements OrderService {
         } catch (org.springframework.dao.DuplicateKeyException e) {
             // 如果数据库仍有唯一约束导致插入失败，记录日志但继续处理
             // 建议执行 remove_unique_constraint.sql 迁移脚本删除唯一约束
-            System.err.println("警告: 插入记录失败（可能因唯一约束），跳过该记录: " +
-                    "trackingNumber=" + incoming.getTrackingNumber() +
-                    ", sn=" + incoming.getSn() +
-                    ", 错误: " + e.getMessage());
+            log.warn("插入记录失败（可能因唯一约束），跳过该记录: trackingNumber={}, sn={}, 错误: {}",
+                    incoming.getTrackingNumber(), incoming.getSn(), e.getMessage());
             // 不抛出异常，继续处理下一条记录
         }
     }
@@ -1716,4 +1657,3 @@ public class OrderServiceImpl implements OrderService {
         orderRecordMapper.deleteBatchIds(validIds);
     }
 }
-

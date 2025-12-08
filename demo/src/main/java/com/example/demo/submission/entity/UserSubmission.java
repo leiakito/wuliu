@@ -29,6 +29,11 @@ public class UserSubmission {
 
     private String remark;
 
+    /**
+     * 用户指定的订单日期，用于匹配特定日期的订单（如中文单号按日期区分）
+     */
+    private LocalDate orderDate;
+
     private LocalDateTime createdAt;
 
     private LocalDateTime updatedAt;

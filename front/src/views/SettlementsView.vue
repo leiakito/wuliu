@@ -161,12 +161,13 @@
         @selection-change="handleSelection"
         @row-click="handleRowClick"
         @sort-change="handleSortChange"
+        class="compact-table"
       >
-        <el-table-column type="selection" width="48" />
+        <el-table-column type="selection" width="40" />
         <el-table-column
           prop="orderTime"
-          label="下单时间"
-          width="180"
+          label="时间"
+          width="145"
           sortable="custom"
           :sort-orders="['ascending', 'descending']"
         >
@@ -175,34 +176,44 @@
         <el-table-column
           prop="trackingNumber"
           label="单号"
-          width="180"
+          width="140"
           sortable="custom"
           :sort-orders="['ascending', 'descending']"
         >
           <template #default="{ row }">
-            <span :style="styleFor(row, 'tracking')">{{ row.trackingNumber }}</span>
+            <span
+              :style="styleFor(row, 'tracking')"
+              class="copyable-cell"
+              @click="copyText(row.trackingNumber)"
+              :title="row.trackingNumber ? '点击复制' : ''"
+            >{{ row.trackingNumber }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="model" label="型号" width="280">
+        <el-table-column prop="model" label="型号" width="160">
           <template #default="{ row }">
-            <span :style="styleFor(row, 'model')">{{ row.model || '-' }}</span>
+            <span
+              :style="styleFor(row, 'model')"
+              class="copyable-cell"
+              @click="copyText(row.model)"
+              :title="row.model ? '点击复制' : ''"
+            >{{ row.model || '-' }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="orderSn" label="SN" width="180">
+        <el-table-column prop="orderSn" label="SN" width="155">
           <template #default="{ row }">
             <span
               :style="styleFor(row, 'sn')"
               :class="{ 'sn-wrap': row.orderSn && row.orderSn.length > 7 }"
-              class="sn-cell"
-              @click="copySn(row.orderSn)"
+              class="copyable-cell"
+              @click="copyText(row.orderSn)"
               :title="row.orderSn ? '点击复制' : ''"
             >{{ row.orderSn || '-' }}</span>
           </template>
         </el-table-column>
         <el-table-column
           prop="amount"
-          label="结账金额"
-          width="180"
+          label="金额"
+          width="95"
           sortable="custom"
           :sort-orders="['ascending', 'descending']"
         >
@@ -213,54 +224,54 @@
               :step="10"
               size="small"
               :controls="false"
-              placeholder="输入金额"
+              placeholder="金额"
               style="width: 100%"
             />
           </template>
         </el-table-column>
-        <el-table-column prop="ownerUsername" label="归属人" width="100">
+        <el-table-column prop="ownerUsername" label="归属" width="70">
           <template #default="{ row }">{{ row.ownerUsername || '-' }}</template>
         </el-table-column>
-        <el-table-column prop="submitterUsername" label="提交人" width="100">
+        <el-table-column prop="submitterUsername" label="提交人" width="70">
           <template #default="{ row }">{{ row.submitterUsername || '-' }}</template>
         </el-table-column>
         <el-table-column
           prop="status"
           label="状态"
-          width="100"
+          width="80"
           sortable="custom"
           :sort-orders="['ascending', 'descending']"
         >
           <template #default="{ row }">
-            <el-tag :type="row.status === 'CONFIRMED' ? 'success' : 'warning'">
+            <el-tag size="small" :type="row.status === 'CONFIRMED' ? 'success' : 'warning'">
               {{ row.status === 'CONFIRMED' ? '已确认' : '待结账' }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="remark" label="备注" width="200">
+        <el-table-column prop="remark" label="备注" min-width="120">
           <template #default="{ row }">
             <el-input
               v-model="row.remark"
               size="small"
-              placeholder="输入备注"
+              placeholder="备注"
               :style="styleFor(row, 'remark')"
-              @focus="onRemarkFocus(row)"
-              @blur="onRemarkBlur(row)"
             />
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="160">
+        <el-table-column label="操作" width="100" fixed="right">
           <template #default="{ row }">
             <el-button
               v-if="row.status !== 'CONFIRMED'"
               link
               type="primary"
+              size="small"
               @click="openConfirm(row)">
               确认
             </el-button>
             <el-button
               link
               type="danger"
+              size="small"
               @click="handleDeleteOne(row)">
               删除
             </el-button>
@@ -426,7 +437,8 @@ import type {
 import { useAuthStore } from '@/store/auth';
 
 const auth = useAuthStore();
-const isAdmin = computed(() => auth.user?.role === 'ADMIN');
+// 所有用户都可以使用全部功能
+const isAdmin = computed(() => true);
 const settlementStatusMap: Record<string, string> = {
   PENDING: '待结账',
   CONFIRMED: '已确认',
@@ -681,48 +693,7 @@ const handleRowClick = (row: SettlementRecord) => {
   tableRef.value?.toggleRowSelection(row, !alreadySelected);
 };
 
-// 备注编辑：记录聚焦时的原始值
-const remarkOriginalValues = new Map<number, string>();
-
-const onRemarkFocus = (row: SettlementRecord) => {
-  remarkOriginalValues.set(row.id, row.remark || '');
-};
-
-const onRemarkBlur = async (row: SettlementRecord) => {
-  const originalValue = remarkOriginalValues.get(row.id) ?? '';
-  const newValue = row.remark || '';
-
-  // 如果值没有变化，不发请求
-  if (originalValue === newValue) {
-    remarkOriginalValues.delete(row.id);
-    return;
-  }
-
-  try {
-    const payload = {
-      amount: row.amount ?? 0,
-      remark: newValue,
-      version: row.version ?? 0
-    };
-    await updateSettlementAmount(row.id, payload);
-    // 更新本地版本号
-    row.version = (row.version ?? 0) + 1;
-    remarkOriginalValues.delete(row.id);
-  } catch (error: any) {
-    const errorMessage = error?.response?.data?.message || error?.message || '';
-    if (errorMessage.includes('已被') || errorMessage.includes('修改')) {
-      ElMessage({
-        type: 'warning',
-        message: '该记录已被其他用户修改，已自动刷新最新数据',
-        duration: 5000,
-        showClose: true
-      });
-    } else {
-      ElMessage.error('保存备注失败');
-    }
-    await loadData();
-  }
-};
+// 备注编辑已改为手动点击确认时保存，移除自动保存逻辑
 
 const openBatchPriceDialog = () => {
   // 所有用户都可以批量设置价格
@@ -744,29 +715,46 @@ const openBatchConfirmDialog = () => {
   batchConfirmDialog.visible = true;
 };
 
+// 保存单条确认的目标记录引用
+const confirmTargetRow = ref<SettlementRecord | null>(null);
+
 const openConfirm = (row: SettlementRecord) => {
+  confirmTargetRow.value = row;
   confirmDialog.visible = true;
   confirmDialog.targetId = row.id;
   confirmDialog.form.amount = row.amount ?? 0;
   confirmDialog.form.remark = row.remark ?? '';
-  confirmDialog.form.version = row.version ?? 0; // 保存版本号
+  confirmDialog.form.version = row.version ?? 0;
 };
 
 const submitConfirm = async () => {
   if (!confirmDialog.targetId) return;
   confirmDialog.loading = true;
   try {
+    // 使用表格中的最新金额和备注（用户可能在表格中直接修改了）
+    const row = confirmTargetRow.value;
+    const amount = row?.amount ?? confirmDialog.form.amount;
+    const remark = row?.remark ?? confirmDialog.form.remark;
+
+    // 先保存金额和备注
+    await updateSettlementAmount(confirmDialog.targetId, {
+      amount: amount,
+      remark: remark,
+      version: confirmDialog.form.version
+    });
+
+    // 然后执行确认
     const payload: SettlementConfirmRequest = {
-      amount: confirmDialog.form.amount,
-      remark: confirmDialog.form.remark,
-      version: confirmDialog.form.version // 传递版本号
+      amount: amount,
+      remark: remark,
+      version: (confirmDialog.form.version ?? 0) + 1 // 版本号已增加
     };
     await confirmSettlement(confirmDialog.targetId, payload);
     ElMessage.success('已确认');
     confirmDialog.visible = false;
+    confirmTargetRow.value = null;
     loadData();
   } catch (error: any) {
-    // 检查是否是乐观锁冲突
     const errorMessage = error?.response?.data?.message || error?.message || '';
     if (errorMessage.includes('已被') || errorMessage.includes('修改')) {
       ElMessage({
@@ -776,7 +764,6 @@ const submitConfirm = async () => {
         showClose: true
       });
     }
-    // 刷新数据获取最新版本号
     await loadData();
   } finally {
     confirmDialog.loading = false;
@@ -904,9 +891,19 @@ const submitBatchConfirm = async () => {
   }
   batchConfirmDialog.loading = true;
   try {
+    // 先保存每条选中记录在表格中输入的金额
+    const savePromises = selectedRecords.value.map(record => {
+      return updateSettlementAmount(record.id, {
+        amount: record.amount ?? 0,
+        remark: record.remark,
+        version: record.version ?? 0
+      });
+    });
+    await Promise.all(savePromises);
+
+    // 然后执行批量确认（不传递 amount，保留各记录自己的金额）
     const payload: SettlementBatchConfirmRequest = {
       ids: [...selectedIds.value],
-      amount: batchConfirmDialog.form.amount ?? undefined,
       remark: batchConfirmDialog.form.remark || undefined
     };
     await confirmSettlementsBatch(payload);
@@ -1136,9 +1133,9 @@ const styleFor = (row: SettlementRecord, field: 'tracking' | 'model' | 'sn' | 'a
 
 const statusLabel = (value?: string) => settlementStatusMap[value ?? ''] || '未知';
 
-const copySn = (sn?: string) => {
-  if (!sn) return;
-  navigator.clipboard.writeText(sn).then(() => {
+const copyText = (text?: string) => {
+  if (!text || text === '-') return;
+  navigator.clipboard.writeText(text).then(() => {
     ElMessage.success('已复制');
   });
 };
@@ -1178,6 +1175,19 @@ const handleConfirmAll = async () => {
 
   loading.value = true;
   try {
+    // 先保存当前页面中所有待结账记录的金额和备注
+    const pendingRecords = records.value.filter(r => r.status !== 'CONFIRMED');
+    if (pendingRecords.length > 0) {
+      const savePromises = pendingRecords.map(record => {
+        return updateSettlementAmount(record.id, {
+          amount: record.amount ?? 0,
+          remark: record.remark,
+          version: record.version ?? 0
+        });
+      });
+      await Promise.all(savePromises);
+    }
+
     // 准备筛选参数，并强制状态为 PENDING
     const payload: SettlementFilterRequest = { ...params.value, status: 'PENDING' };
     // 后端分页参数在 confirmAll 中不需要，移除它们
@@ -1200,12 +1210,13 @@ loadData();
 <style scoped>
 .actions {
   display: flex;
-  gap: 12px;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .filter-form {
   display: flex;
-  gap: 12px;
+  gap: 8px;
   flex-wrap: wrap;
 }
 
@@ -1216,6 +1227,39 @@ loadData();
 .highlight-row {
   background: #f0f9eb !important;
 }
+
+/* 紧凑表格样式 */
+.compact-table :deep(.el-table__cell) {
+  padding: 4px 0;
+}
+
+.compact-table :deep(.cell) {
+  padding: 0 6px;
+  font-size: 13px;
+}
+
+.compact-table :deep(.el-table__header th) {
+  padding: 6px 0;
+  font-size: 13px;
+}
+
+.compact-table :deep(.el-input-number) {
+  width: 100% !important;
+}
+
+.compact-table :deep(.el-input-number .el-input__inner) {
+  padding: 0 6px;
+  text-align: center;
+}
+
+.compact-table :deep(.el-input__inner) {
+  padding: 0 6px;
+}
+
+.compact-table :deep(.el-tag) {
+  padding: 0 6px;
+}
+
 :deep(.el-table__body) {
   color: #0a0a0a;
 }
@@ -1223,14 +1267,20 @@ loadData();
 :deep(.el-table__body td .cell) {
   color: #0a0a0a;
 }
-.sn-cell {
+.copyable-cell {
   cursor: pointer;
+}
+
+.copyable-cell:hover {
+  color: #409eff;
+  text-decoration: underline;
 }
 .sn-wrap {
   word-break: break-all;
   white-space: normal;
   display: -webkit-box;
   -webkit-line-clamp: 2;
+  line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }

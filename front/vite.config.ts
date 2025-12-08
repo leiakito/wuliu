@@ -23,5 +23,11 @@ export default defineConfig({
         changeOrigin: true
       }
     }
+  },
+  build: {
+    // 生产构建去掉 console/debugger，减少体积与运行时开销
+    esbuild: {
+      drop: ['console', 'debugger']
+    }
   }
 });

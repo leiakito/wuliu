@@ -210,7 +210,8 @@ import {
 const auth = useAuthStore();
 const router = useRouter();
 const route = useRoute();
-const isAdmin = computed(() => auth.user?.role === 'ADMIN');
+// 所有用户都可以使用全部功能
+const isAdmin = computed(() => true);
 
 const searchInput = ref('');
 const searchLoading = ref(false);

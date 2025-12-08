@@ -281,6 +281,93 @@ SET @sql := IF(@need = 0,
 );
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
+-- =============================
+-- G. order_record 添加 status_changed_at 字段（幂等）
+-- 用于记录最后一次状态变更的时间
+-- =============================
+SET @need := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'order_record'
+    AND COLUMN_NAME = 'status_changed_at'
+);
+SET @sql := IF(@need = 0,
+  'ALTER TABLE order_record ADD COLUMN status_changed_at DATETIME COMMENT ''最后状态变更时间'' AFTER status',
+  'DO 0'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+-- =============================
+-- H. user_submission 添加 order_date 字段并更新唯一索引（幂等）
+-- 用于按日期区分同一单号的不同提交（如中文单号）
+-- =============================
+
+-- H.1) 添加 order_date 字段（若不存在）
+SET @need := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'user_submission'
+    AND COLUMN_NAME = 'order_date'
+);
+SET @sql := IF(@need = 0,
+  'ALTER TABLE user_submission ADD COLUMN order_date DATE COMMENT ''用户指定的订单日期，用于匹配特定日期的订单'' AFTER submission_date',
+  'DO 0'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+-- H.2) 添加 order_date 索引（若不存在）
+SET @exists := (
+  SELECT COUNT(*) FROM information_schema.statistics
+  WHERE table_schema = DATABASE()
+    AND table_name = 'user_submission'
+    AND index_name = 'idx_submission_order_date'
+);
+SET @sql := IF(@exists = 0,
+  'CREATE INDEX idx_submission_order_date ON user_submission(order_date)',
+  'DO 0'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+-- H.3) 删除旧的唯一索引 uk_submission_tracking_active（若存在）
+SET @exists := (
+  SELECT COUNT(*) FROM information_schema.statistics
+  WHERE table_schema = DATABASE()
+    AND table_name = 'user_submission'
+    AND index_name = 'uk_submission_tracking_active'
+);
+SET @sql := IF(@exists > 0,
+  'ALTER TABLE user_submission DROP INDEX uk_submission_tracking_active',
+  'DO 0'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+-- H.4) 删除旧的唯一索引 uk_submission_tracking_date_active（若存在，避免重复创建）
+SET @exists := (
+  SELECT COUNT(*) FROM information_schema.statistics
+  WHERE table_schema = DATABASE()
+    AND table_name = 'user_submission'
+    AND index_name = 'uk_submission_tracking_date_active'
+);
+SET @sql := IF(@exists > 0,
+  'ALTER TABLE user_submission DROP INDEX uk_submission_tracking_date_active',
+  'DO 0'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+-- H.5) 创建新的复合唯一索引 uk_submission_tracking_date_active（单号+日期+deleted）
+-- 注意：order_date 可以为 NULL，MySQL 中 NULL 值在唯一索引中不会冲突
+SET @exists := (
+  SELECT COUNT(*) FROM information_schema.statistics
+  WHERE table_schema = DATABASE()
+    AND table_name = 'user_submission'
+    AND index_name = 'uk_submission_tracking_date_active'
+);
+SET @sql := IF(@exists = 0,
+  'CREATE UNIQUE INDEX uk_submission_tracking_date_active ON user_submission(tracking_number, order_date, deleted)',
+  'DO 0'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
 -- 验证（按需执行）
 -- EXPLAIN SELECT * FROM settlement_record WHERE order_id IN (SELECT id FROM order_record WHERE UPPER(sn) = 'TEST');
 -- EXPLAIN SELECT * FROM settlement_record WHERE status = 'PENDING' ORDER BY order_time DESC LIMIT 20;

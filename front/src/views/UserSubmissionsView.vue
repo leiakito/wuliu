@@ -24,6 +24,16 @@
             <el-form-item label="单号" prop="trackingNumber">
               <el-input v-model.trim="form.trackingNumber" placeholder="请输入或粘贴物流单号" />
             </el-form-item>
+            <el-form-item label="订单日期">
+              <el-date-picker
+                v-model="form.orderDate"
+                type="date"
+                value-format="YYYY-MM-DD"
+                placeholder="可选，用于匹配指定日期的订单"
+                style="width: 100%"
+              />
+              <div class="form-tip">中文单号建议选择日期，以区分不同日期的订单</div>
+            </el-form-item>
             <el-form-item>
               <el-button type="primary" :loading="submitLoading" @click="handleSubmit">提交单号</el-button>
               <el-button @click="resetForm">清空</el-button>
@@ -195,7 +205,13 @@
       </el-table>
     </el-card>
 
-    <el-dialog v-model="batchDialog.visible" title="批量提交单号" width="520px">
+    <el-dialog
+      v-model="batchDialog.visible"
+      title="批量提交单号"
+      width="520px"
+      :close-on-click-modal="false"
+      :destroy-on-close="true"
+    >
       <div class="batch-tip">
           <p>支持一次粘贴多个单号，系统会自动提取每行中的第一个编号。</p>
           <p>批量提交请确保每个单号单独换行。</p>
@@ -203,6 +219,16 @@
           <pre class="batch-example">JDX044863610899
 343138058920</pre>
         </div>
+      <el-form-item label="订单日期" style="margin-bottom: 12px;">
+        <el-date-picker
+          v-model="batchDialog.orderDate"
+          type="date"
+          value-format="YYYY-MM-DD"
+          placeholder="可选，用于匹配指定日期的订单"
+          style="width: 100%"
+        />
+        <div class="form-tip">中文单号建议选择日期，以区分不同日期的订单</div>
+      </el-form-item>
       <el-input
         v-model="batchDialog.raw"
         type="textarea"
@@ -225,7 +251,13 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="ownerDialogVisible" title="归属人管理" width="500px">
+    <el-dialog
+      v-model="ownerDialogVisible"
+      title="归属人管理"
+      width="500px"
+      :close-on-click-modal="false"
+      :destroy-on-close="true"
+    >
       <div class="owner-dialog-header">
         <el-button type="primary" size="small" @click="addOwner">添加</el-button>
         <el-button
@@ -274,7 +306,8 @@ import { useAuthStore } from '@/store/auth';
 
 const auth = useAuthStore();
 const router = useRouter();
-const isAdmin = computed(() => auth.user?.role === 'ADMIN');
+// 所有用户都可以使用全部功能
+const isAdmin = computed(() => true);
 
 const statusOptions = [
   { label: '待处理', value: 'PENDING', type: 'warning' },
@@ -306,7 +339,8 @@ const orderStatusTag = (value?: string) =>
 
 const formRef = ref<FormInstance>();
 const form = reactive<UserSubmissionCreateRequest>({
-  trackingNumber: ''
+  trackingNumber: '',
+  orderDate: ''
 });
 
 const rules: FormRules<UserSubmissionCreateRequest> = {
@@ -336,7 +370,8 @@ const batchDialog = reactive({
   visible: false,
   loading: false,
   raw: '',
-  list: [] as string[]
+  list: [] as string[],
+  orderDate: ''
 });
 
 const buildQueryParams = (): SubmissionQueryParams => ({
@@ -476,16 +511,26 @@ const handleSubmit = async () => {
     ElMessage.warning(`单号未在物流单号中：${missing.join('、')}`);
     return;
   }
-  const existsLocally = submissions.value.some(
-    item => item.trackingNumber?.trim().toUpperCase() === normalized.toUpperCase()
-  );
+  // 检查本地是否已存在相同单号（如果指定了日期，还需匹配日期）
+  const existsLocally = submissions.value.some(item => {
+    const trackingMatch = item.trackingNumber?.trim().toUpperCase() === normalized.toUpperCase();
+    if (!trackingMatch) return false;
+    // 如果没有指定日期，检查是否有任何相同单号
+    if (!form.orderDate) return true;
+    // 如果指定了日期，检查是否有相同单号+日期的提交
+    return item.orderDate === form.orderDate;
+  });
   if (existsLocally) {
-    ElMessage.warning('该单号已提交，请勿重复提交');
+    const msg = form.orderDate
+      ? `该单号在 ${form.orderDate} 已提交，请勿重复提交`
+      : '该单号已提交，请勿重复提交';
+    ElMessage.warning(msg);
     return;
   }
   const payload: UserSubmissionCreateRequest = {
     trackingNumber: normalized,
-    username: selectedOwner.value?.trim() || undefined
+    username: selectedOwner.value?.trim() || undefined,
+    orderDate: form.orderDate || undefined
   };
   submitLoading.value = true;
   try {
@@ -507,6 +552,7 @@ const handleSubmit = async () => {
 
 const resetForm = () => {
   form.trackingNumber = '';
+  form.orderDate = '';
   formRef.value?.clearValidate();
 };
 
@@ -607,6 +653,7 @@ const handleSizeChange = (size: number) => {
 const openBatchDialog = () => {
   batchDialog.raw = '';
   batchDialog.list = [];
+  batchDialog.orderDate = '';
   batchDialog.visible = true;
   if (!ownerOptions.value.length) {
     loadOwnerOptions();
@@ -660,7 +707,8 @@ const submitBatch = async () => {
     const payload: UserSubmissionBatchRequest = {
       trackingNumbers: [...batchDialog.list],
       rawContent: batchDialog.raw,
-      username: selectedOwner.value?.trim() || undefined
+      username: selectedOwner.value?.trim() || undefined,
+      orderDate: batchDialog.orderDate || undefined
     };
     await submitUserSubmissionsBatch(payload);
     ElMessage.success('批量提交成功');
@@ -972,5 +1020,11 @@ watch(isAdmin, value => {
   color: #909399;
   text-align: center;
   padding: 40px 0;
+}
+
+.form-tip {
+  font-size: 12px;
+  color: #909399;
+  margin-top: 4px;
 }
 </style>
