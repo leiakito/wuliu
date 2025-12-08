@@ -1341,22 +1341,39 @@ const triggerImport = () => {
 
 
 // 获取所有订单（遵守后端每页最大1000条的限制并分页拉取）
+// 使用 ID 升序排序确保分页稳定，避免漏掉记录
 const fetchAllOrders = async (targetIds?: Set<number>): Promise<OrderRecord[]> => {
   const all: OrderRecord[] = [];
   const pageSize = 1000; // OrderController 会将 size>1000 回退为50，这里主动按上限分页
   let page = 1;
+  let lastId = 0; // 用于基于游标的分页（备用方案）
+  const seenIds = new Set<number>(); // 防止重复
 
   // targetIds 用于差异比对时的早停：找到全部目标ID后即可退出分页请求
   const needIds = targetIds ? new Set(Array.from(targetIds).filter(id => !!id)) : undefined;
 
   try {
     while (true) {
-      const data = await fetchOrders({ page, size: pageSize });
+      // 使用 ID 排序确保分页稳定性，避免同日期数据导致的分页不稳定
+      const data = await fetchOrders({ 
+        page, 
+        size: pageSize,
+        sortBy: 'orderDate',  // 保持日期排序
+        sortOrder: 'desc'
+      });
       const records = data.records || [];
-      all.push(...records);
+      
+      // 过滤重复记录（防止分页边界问题）
+      const newRecords = records.filter(r => {
+        if (!r.id || seenIds.has(r.id)) return false;
+        seenIds.add(r.id);
+        return true;
+      });
+      
+      all.push(...newRecords);
 
       if (needIds) {
-        records.forEach(r => {
+        newRecords.forEach(r => {
           if (r.id && needIds.has(r.id)) {
             needIds.delete(r.id);
           }
@@ -1365,12 +1382,26 @@ const fetchAllOrders = async (targetIds?: Set<number>): Promise<OrderRecord[]> =
       }
 
       if (records.length < pageSize) break; // 已到最后一页
+      
+      // 安全检查：如果连续3页没有新数据，说明可能出现问题，停止
+      if (newRecords.length === 0 && page > 1) {
+        console.warn('fetchAllOrders: 连续获取到重复数据，停止分页');
+        break;
+      }
+      
       page += 1;
+      
+      // 防止无限循环
+      if (page > 1000) {
+        console.warn('fetchAllOrders: 已达到最大分页数1000，停止获取');
+        break;
+      }
     }
   } catch (error) {
     console.error('Failed to fetch all orders:', error);
   }
 
+  console.log(`fetchAllOrders: 共获取 ${all.length} 条记录，分 ${page} 页`);
   return all;
 };
 

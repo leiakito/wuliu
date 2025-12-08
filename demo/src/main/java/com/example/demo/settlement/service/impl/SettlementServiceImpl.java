@@ -1170,8 +1170,8 @@ public class SettlementServiceImpl implements SettlementService {
 
         int confirmedCount = 0;
         for (SettlementRecord record : recordsToConfirm) {
-            // 只处理有金额的记录
-            if (record.getAmount() != null) {
+            // 只处理金额大于0的记录（金额为null或0的跳过）
+            if (record.getAmount() != null && record.getAmount().compareTo(BigDecimal.ZERO) > 0) {
                 // 确认操作：将状态改为 CONFIRMED
                 record.setStatus("CONFIRMED");
                 record.setSettleBatch("BATCH-" + LocalDate.now());

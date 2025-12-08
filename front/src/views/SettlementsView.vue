@@ -1175,17 +1175,32 @@ const handleConfirmAll = async () => {
 
   loading.value = true;
   try {
-    // 先保存当前页面中所有待结账记录的金额和备注
-    const pendingRecords = records.value.filter(r => r.status !== 'CONFIRMED');
+    // 先保存当前页面中所有待结账且金额大于0的记录的金额和备注
+    const pendingRecords = records.value.filter(r => 
+      r.status !== 'CONFIRMED' && 
+      r.amount !== null && 
+      r.amount !== undefined && 
+      Number(r.amount) > 0
+    );
+    
+    console.log(`找到 ${pendingRecords.length} 条待保存的记录:`, pendingRecords.map(r => ({ id: r.id, amount: r.amount, status: r.status })));
+    
     if (pendingRecords.length > 0) {
-      const savePromises = pendingRecords.map(record => {
+      // 逐条保存，收集失败的记录
+      const saveResults = await Promise.allSettled(pendingRecords.map(record => {
+        console.log(`保存记录 ID=${record.id}, 金额=${record.amount}`);
         return updateSettlementAmount(record.id, {
           amount: record.amount ?? 0,
-          remark: record.remark,
-          version: record.version ?? 0
+          remark: record.remark
         });
-      });
-      await Promise.all(savePromises);
+      }));
+      
+      // 检查是否有保存失败的
+      const failedSaves = saveResults.filter(r => r.status === 'rejected');
+      if (failedSaves.length > 0) {
+        console.error('部分金额保存失败:', failedSaves);
+        ElMessage.warning(`有 ${failedSaves.length} 条记录保存金额失败，将继续确认其他记录`);
+      }
     }
 
     // 准备筛选参数，并强制状态为 PENDING
@@ -1193,12 +1208,21 @@ const handleConfirmAll = async () => {
     // 后端分页参数在 confirmAll 中不需要，移除它们
     delete payload.page;
     delete payload.size;
+    
+    console.log('调用 confirmAll，筛选参数:', payload);
 
     const count = await confirmAllSettlements(payload);
-    ElMessage.success(`操作成功，已确认 ${count} 条记录。`);
+    console.log(`confirmAll 返回确认数量: ${count}`);
+    
+    if (count === 0) {
+      ElMessage.warning('没有可确认的记录（金额为0或空的记录会被跳过）');
+    } else {
+      ElMessage.success(`操作成功，已确认 ${count} 条记录。`);
+    }
     loadData(); // 重新加载数据
-  } catch (error) {
+  } catch (error: any) {
     console.error('确认全部失败:', error);
+    ElMessage.error(error?.response?.data?.message || '确认全部操作失败');
   } finally {
     loading.value = false;
   }

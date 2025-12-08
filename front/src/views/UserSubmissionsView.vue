@@ -29,10 +29,10 @@
                 v-model="form.orderDate"
                 type="date"
                 value-format="YYYY-MM-DD"
-                placeholder="可选，用于匹配指定日期的订单"
+                placeholder="中文单号必填"
                 style="width: 100%"
               />
-              <div class="form-tip">中文单号建议选择日期，以区分不同日期的订单</div>
+              <div class="form-tip" style="color: #e6a23c;">⚠️ 中文单号必须选择日期，以区分不同日期的订单</div>
             </el-form-item>
             <el-form-item>
               <el-button type="primary" :loading="submitLoading" @click="handleSubmit">提交单号</el-button>
@@ -224,10 +224,10 @@
           v-model="batchDialog.orderDate"
           type="date"
           value-format="YYYY-MM-DD"
-          placeholder="可选，用于匹配指定日期的订单"
+          placeholder="中文单号必填"
           style="width: 100%"
         />
-        <div class="form-tip">中文单号建议选择日期，以区分不同日期的订单</div>
+        <div class="form-tip" style="color: #e6a23c;">⚠️ 中文单号必须选择日期，以区分不同日期的订单</div>
       </el-form-item>
       <el-input
         v-model="batchDialog.raw"
@@ -505,6 +505,11 @@ const handleSubmit = async () => {
   if (!normalized) {
     return;
   }
+  // 中文单号必须选择日期
+  if (containsChinese(normalized) && !form.orderDate) {
+    ElMessage.warning('中文单号必须选择订单日期，以区分不同日期的订单');
+    return;
+  }
   const missing = await checkMissingTrackings([normalized]);
   if (missing.length) {
     recordInvalidTrackings(missing);
@@ -563,9 +568,15 @@ const handleSearch = () => {
 
 const normalizeTrackingNumber = (value: string) =>
   (value ?? '')
-    .replace(/^[='‘’“”"`\u200B-\u200F\uFEFF]+/, '')
+    .replace(/^[='''"""`\u200B-\u200F\uFEFF]+/, '')
     .trim()
     .replace(/-+$/, '');
+
+// 检测字符串是否包含中文字符
+const containsChinese = (str: string): boolean => {
+  if (!str) return false;
+  return /[\u4e00-\u9fa5]/.test(str);
+};
 
 const recordInvalidTrackings = (list: string[]) => {
   // 按单号去重（不区分大小写）
@@ -694,6 +705,12 @@ watch(() => batchDialog.raw, () => {
 const submitBatch = async () => {
   if (!batchDialog.list.length) {
     ElMessage.warning('请先输入单号');
+    return;
+  }
+  // 检查是否有中文单号，如果有则必须选择日期
+  const chineseTrackings = batchDialog.list.filter(tn => containsChinese(tn));
+  if (chineseTrackings.length > 0 && !batchDialog.orderDate) {
+    ElMessage.warning(`包含中文单号（如：${chineseTrackings[0]}），必须选择订单日期`);
     return;
   }
   const missing = await checkMissingTrackings(batchDialog.list);

@@ -116,11 +116,11 @@ public class OrderServiceImpl implements OrderService {
 
     private Map<String, CellStyleSnap> buildStyleMap(OrderRecord r) {
         Map<String, CellStyleSnap> m = new HashMap<>();
-        m.put("tracking", new CellStyleSnap(norm(r.getTrackingBgColor()), norm(r.getTrackingFontColor()), bool(r.getTrackingStrike()), bool(r.getTrackingBold())));
-        m.put("model",    new CellStyleSnap(norm(r.getModelBgColor()),    norm(r.getModelFontColor()),    bool(r.getModelStrike()),    bool(r.getModelBold())));
-        m.put("sn",       new CellStyleSnap(norm(r.getSnBgColor()),       norm(r.getSnFontColor()),       bool(r.getSnStrike()),       bool(r.getSnBold())));
-        m.put("remark",   new CellStyleSnap(norm(r.getRemarkBgColor()),   norm(r.getRemarkFontColor()),   bool(r.getRemarkStrike()),   bool(r.getRemarkBold())));
-        m.put("amount",   new CellStyleSnap(norm(r.getAmountBgColor()),   norm(r.getAmountFontColor()),   bool(r.getAmountStrike()),   bool(r.getAmountBold())));
+        m.put("tracking", new CellStyleSnap(normBg(r.getTrackingBgColor()), normFg(r.getTrackingFontColor()), bool(r.getTrackingStrike()), bool(r.getTrackingBold())));
+        m.put("model",    new CellStyleSnap(normBg(r.getModelBgColor()),    normFg(r.getModelFontColor()),    bool(r.getModelStrike()),    bool(r.getModelBold())));
+        m.put("sn",       new CellStyleSnap(normBg(r.getSnBgColor()),       normFg(r.getSnFontColor()),       bool(r.getSnStrike()),       bool(r.getSnBold())));
+        m.put("remark",   new CellStyleSnap(normBg(r.getRemarkBgColor()),   normFg(r.getRemarkFontColor()),   bool(r.getRemarkStrike()),   bool(r.getRemarkBold())));
+        m.put("amount",   new CellStyleSnap(normBg(r.getAmountBgColor()),   normFg(r.getAmountFontColor()),   bool(r.getAmountStrike()),   bool(r.getAmountBold())));
         return m;
     }
 
@@ -134,43 +134,43 @@ public class OrderServiceImpl implements OrderService {
 
         Map<String, CellStyleSnap> m = new HashMap<>();
 
-        // 从持久化的样式表读取，如果没有则使用默认值
+        // 从持久化的样式表读取，如果没有则使用默认值（背景白色、字体黑色）
         OrderCellStyle trackingStyle = styleMap.get("tracking");
         m.put("tracking", new CellStyleSnap(
-                trackingStyle != null ? norm(trackingStyle.getBgColor()) : norm(null),
-                trackingStyle != null ? norm(trackingStyle.getFontColor()) : norm(null),
+                trackingStyle != null ? normBg(trackingStyle.getBgColor()) : normBg(null),
+                trackingStyle != null ? normFg(trackingStyle.getFontColor()) : normFg(null),
                 trackingStyle != null ? bool(trackingStyle.getStrike()) : Boolean.FALSE,
                 trackingStyle != null ? bool(trackingStyle.getBold()) : Boolean.FALSE
         ));
 
         OrderCellStyle modelStyle = styleMap.get("model");
         m.put("model", new CellStyleSnap(
-                modelStyle != null ? norm(modelStyle.getBgColor()) : norm(null),
-                modelStyle != null ? norm(modelStyle.getFontColor()) : norm(null),
+                modelStyle != null ? normBg(modelStyle.getBgColor()) : normBg(null),
+                modelStyle != null ? normFg(modelStyle.getFontColor()) : normFg(null),
                 modelStyle != null ? bool(modelStyle.getStrike()) : Boolean.FALSE,
                 modelStyle != null ? bool(modelStyle.getBold()) : Boolean.FALSE
         ));
 
         OrderCellStyle snStyle = styleMap.get("sn");
         m.put("sn", new CellStyleSnap(
-                snStyle != null ? norm(snStyle.getBgColor()) : norm(null),
-                snStyle != null ? norm(snStyle.getFontColor()) : norm(null),
+                snStyle != null ? normBg(snStyle.getBgColor()) : normBg(null),
+                snStyle != null ? normFg(snStyle.getFontColor()) : normFg(null),
                 snStyle != null ? bool(snStyle.getStrike()) : Boolean.FALSE,
                 snStyle != null ? bool(snStyle.getBold()) : Boolean.FALSE
         ));
 
         OrderCellStyle remarkStyle = styleMap.get("remark");
         m.put("remark", new CellStyleSnap(
-                remarkStyle != null ? norm(remarkStyle.getBgColor()) : norm(null),
-                remarkStyle != null ? norm(remarkStyle.getFontColor()) : norm(null),
+                remarkStyle != null ? normBg(remarkStyle.getBgColor()) : normBg(null),
+                remarkStyle != null ? normFg(remarkStyle.getFontColor()) : normFg(null),
                 remarkStyle != null ? bool(remarkStyle.getStrike()) : Boolean.FALSE,
                 remarkStyle != null ? bool(remarkStyle.getBold()) : Boolean.FALSE
         ));
 
         OrderCellStyle amountStyle = styleMap.get("amount");
         m.put("amount", new CellStyleSnap(
-                amountStyle != null ? norm(amountStyle.getBgColor()) : norm(null),
-                amountStyle != null ? norm(amountStyle.getFontColor()) : norm(null),
+                amountStyle != null ? normBg(amountStyle.getBgColor()) : normBg(null),
+                amountStyle != null ? normFg(amountStyle.getFontColor()) : normFg(null),
                 amountStyle != null ? bool(amountStyle.getStrike()) : Boolean.FALSE,
                 amountStyle != null ? bool(amountStyle.getBold()) : Boolean.FALSE
         ));
@@ -178,8 +178,10 @@ public class OrderServiceImpl implements OrderService {
         return m;
     }
 
-    private String norm(String c) {
-        // null / 空字符串 / #FFFFFF / #FFF 统一视为白色，不提示变化
+    /**
+     * 标准化背景色：null / 空 / 白色 统一为 #FFFFFF
+     */
+    private String normBg(String c) {
         if (c == null) return "#FFFFFF";
         String s = c.trim();
         if (s.isEmpty()) return "#FFFFFF";
@@ -187,6 +189,28 @@ public class OrderServiceImpl implements OrderService {
         if ("#FFF".equals(s)) return "#FFFFFF";
         if ("#FFFFFF".equals(s)) return "#FFFFFF";
         return s;
+    }
+
+    /**
+     * 标准化字体颜色：null / 空 / 黑色 统一为 #000000
+     */
+    private String normFg(String c) {
+        if (c == null) return "#000000";
+        String s = c.trim();
+        if (s.isEmpty()) return "#000000";
+        s = s.toUpperCase(Locale.ROOT);
+        if ("#000".equals(s)) return "#000000";
+        if ("#000000".equals(s)) return "#000000";
+        // 自动颜色（某些Excel会用 #000008 或类似深色表示默认黑色）
+        if (s.matches("#00000[0-9A-F]")) return "#000000";
+        return s;
+    }
+
+    /**
+     * 兼容旧逻辑的标准化方法（用于背景色）
+     */
+    private String norm(String c) {
+        return normBg(c);
     }
 
     // 与上一次导入快照对比（混合对齐：先 key(运单号+SN)，未命中则按行号），
@@ -493,15 +517,16 @@ public class OrderServiceImpl implements OrderService {
             }
 
             // 通过SN+物流单号+Model匹配数据库记录，设置ID（用于后续更新而非插入），同时进行变更检测
-            // 注意：isChangedAndUpdateBaseline 会更新基线，所以只能调用一次
+            // 使用智能匹配算法，避免删除记录导致的错位问题
             Map<OrderRecord, Boolean> changeResults = new HashMap<>();
+            Set<Long> matchedDbIds = new HashSet<>();  // 记录已匹配的数据库记录ID，避免重复匹配
             for (OrderRecord record : records) {
                 record.setImported(Boolean.TRUE);
                 if (record.getTrackingNumber() != null) {
                     record.setCategory(TrackingCategoryUtil.resolve(record.getTrackingNumber()));
                 }
-                // 调用变更检测,这会通过顺序匹配设置record的ID，并返回是否变化
-                boolean changed = isChangedAndUpdateBaselineWithPreload(record, operator, dbRecordsByKey, matchCounterByKey, stylesByOrderId);
+                // 调用变更检测（使用内容相似度智能匹配）
+                boolean changed = isChangedAndUpdateBaselineWithPreload(record, operator, dbRecordsByKey, matchCounterByKey, stylesByOrderId, matchedDbIds);
                 changeResults.put(record, changed);
             }
 
@@ -724,9 +749,12 @@ public class OrderServiceImpl implements OrderService {
                     // 默认按日期降序
                     wrapper.orderByDesc(OrderRecord::getOrderDate);
             }
+            // 添加ID作为二级排序，确保分页稳定性（同日期数据不会跳页丢失）
+            wrapper.orderByDesc(OrderRecord::getId);
         } else {
-            // 没有指定排序时，默认按日期降序
+            // 没有指定排序时，默认按日期降序 + ID降序（确保分页稳定）
             wrapper.orderByDesc(OrderRecord::getOrderDate);
+            wrapper.orderByDesc(OrderRecord::getId);
         }
 
         IPage<OrderRecord> result = orderRecordMapper.selectPage(page, wrapper);
@@ -875,7 +903,8 @@ public class OrderServiceImpl implements OrderService {
     }
 
     /**
-     * 使用预加载数据进行变更检测（支持顺序匹配相同 tracking+sn+model 的记录）
+     * 使用预加载数据进行变更检测（基于内容相似度匹配，解决删除/插入记录导致的错位问题）
+     * @param matchedDbIds 已经被匹配的数据库记录ID集合，避免重复匹配
      */
     private boolean isChangedAndUpdateBaselineWithPreload(
             OrderRecord r,
@@ -883,31 +912,75 @@ public class OrderServiceImpl implements OrderService {
             Map<String, List<OrderRecord>> dbRecordsByKey,
             Map<String, Integer> matchCounterByKey,
             Map<Long, List<OrderCellStyle>> stylesByOrderId) {
+        // 调用新的智能匹配方法，使用空的已匹配集合（兼容旧调用）
+        return isChangedAndUpdateBaselineWithPreload(r, operator, dbRecordsByKey, matchCounterByKey, stylesByOrderId, new HashSet<>());
+    }
+
+    /**
+     * 使用预加载数据进行变更检测（基于内容相似度匹配，解决删除/插入记录导致的错位问题）
+     * @param matchedDbIds 已经被匹配的数据库记录ID集合，避免重复匹配
+     */
+    private boolean isChangedAndUpdateBaselineWithPreload(
+            OrderRecord r,
+            String operator,
+            Map<String, List<OrderRecord>> dbRecordsByKey,
+            Map<String, Integer> matchCounterByKey,
+            Map<Long, List<OrderCellStyle>> stylesByOrderId,
+            Set<Long> matchedDbIds) {
 
         Snapshot s = snaps(operator);
         String matchKey = buildMatchKey(r.getTrackingNumber(), r.getSn(), r.getModel());
 
-        // 从预加载数据中按顺序获取匹配的数据库记录
+        // 构建当前 Excel 记录的样式和值，用于比较
+        Map<String, CellStyleSnap> curStyle = buildStyleMap(r);
+        Map<String, String> curValue = buildValueMap(r);
+
+        // 从预加载数据中智能匹配数据库记录
         OrderRecord dbLatest = null;
         List<OrderCellStyle> dbStyles = null;
+        int bestMatchScore = -1;
 
         List<OrderRecord> candidates = dbRecordsByKey.get(matchKey);
         if (candidates != null && !candidates.isEmpty()) {
-            int matchIndex = matchCounterByKey.getOrDefault(matchKey, 0);
-            if (matchIndex < candidates.size()) {
-                dbLatest = candidates.get(matchIndex);
-                // 增加计数器，下一个相同key的记录会匹配下一个数据库记录
-                matchCounterByKey.put(matchKey, matchIndex + 1);
+            // 优先找完全匹配的记录（内容和样式都相同）
+            for (OrderRecord candidate : candidates) {
+                // 跳过已被其他 Excel 记录匹配的数据库记录
+                if (matchedDbIds.contains(candidate.getId())) {
+                    continue;
+                }
 
+                List<OrderCellStyle> candidateStyles = stylesByOrderId.get(candidate.getId());
+                Map<String, CellStyleSnap> dbStyleMap = buildStyleMapFromDb(candidate, candidateStyles);
+                Map<String, String> dbValueMap = buildValueMap(candidate);
+
+                // 计算相似度分数
+                int score = calculateMatchScore(curValue, curStyle, dbValueMap, dbStyleMap);
+
+                // 完全匹配（分数=100）优先
+                if (score == 100) {
+                    dbLatest = candidate;
+                    dbStyles = candidateStyles;
+                    bestMatchScore = score;
+                    break;
+                }
+
+                // 记录最佳匹配
+                if (score > bestMatchScore) {
+                    bestMatchScore = score;
+                    dbLatest = candidate;
+                    dbStyles = candidateStyles;
+                }
+            }
+
+            // 如果找到匹配，标记为已使用
+            if (dbLatest != null) {
+                matchedDbIds.add(dbLatest.getId());
                 r.setId(dbLatest.getId());
-                dbStyles = stylesByOrderId.get(dbLatest.getId());
             }
         }
 
         // 如果找到匹配的数据库记录，进行比较
         if (dbLatest != null) {
-            Map<String, CellStyleSnap> curStyle = buildStyleMap(r);
-            Map<String, String> curValue = buildValueMap(r);
             Map<String, CellStyleSnap> dbStyleMap = buildStyleMapFromDb(dbLatest, dbStyles);
             Map<String, String> dbValueMap = buildValueMap(dbLatest);
 
@@ -947,9 +1020,6 @@ public class OrderServiceImpl implements OrderService {
 
         // 数据库中不存在，视为新记录
         String key = styleKey(r);
-        Map<String, CellStyleSnap> curStyle = buildStyleMap(r);
-        Map<String, String> curValue = buildValueMap(r);
-
         s.LAST_IMPORT_SNAPSHOT.put(key, curStyle);
         s.LAST_VALUE_SNAPSHOT.put(key, curValue);
         if (r.getExcelRowIndex() != null) {
@@ -961,6 +1031,43 @@ public class OrderServiceImpl implements OrderService {
         s.LAST_VALUE_BY_TRACKING.put(tKey, curValue);
 
         return true;  // 新记录视为有变化
+    }
+
+    /**
+     * 计算 Excel 记录与数据库记录的匹配分数（0-100）
+     * 100 = 完全匹配（值和样式都相同）
+     * 越高越相似
+     */
+    private int calculateMatchScore(
+            Map<String, String> excelValue, Map<String, CellStyleSnap> excelStyle,
+            Map<String, String> dbValue, Map<String, CellStyleSnap> dbStyle) {
+
+        int score = 0;
+        List<String> fields = Arrays.asList("tracking", "model", "sn", "remark", "amount");
+
+        for (String f : fields) {
+            // 值匹配（每个字段15分，共75分）
+            String ev = excelValue.get(f);
+            String dv = dbValue.get(f);
+            if (Objects.equals(ev, dv)) {
+                score += 15;
+            }
+
+            // 样式匹配（每个字段5分，共25分）
+            CellStyleSnap es = excelStyle.get(f);
+            CellStyleSnap ds = dbStyle.get(f);
+            if (es != null && ds != null) {
+                boolean bgMatch = Objects.equals(es.getBg(), ds.getBg());
+                boolean fgMatch = Objects.equals(es.getFont(), ds.getFont());
+                boolean strikeMatch = Objects.equals(es.getStrike(), ds.getStrike());
+                boolean boldMatch = Objects.equals(es.getBold(), ds.getBold());
+                if (bgMatch && fgMatch && strikeMatch && boldMatch) {
+                    score += 5;
+                }
+            }
+        }
+
+        return score;
     }
 
     /**
@@ -1102,18 +1209,19 @@ public class OrderServiceImpl implements OrderService {
         String oldFg = oldS == null ? null : oldS.getFontColor();
         Boolean oldSt = oldS == null ? null : oldS.getStrike();
         boolean changed = false;
-        if (!Objects.equals(normalizeColor(oldBg), normalizeColor(newBg))) changed = true;
-        if (!Objects.equals(normalizeColor(oldFg), normalizeColor(newFg))) changed = true;
+        // 使用正确的标准化方法：背景色用 normBg，字体颜色用 normFg
+        if (!Objects.equals(normBg(oldBg), normBg(newBg))) changed = true;
+        if (!Objects.equals(normFg(oldFg), normFg(newFg))) changed = true;
         if (!Objects.equals(bool(oldSt), bool(newStrike))) changed = true;
         if (changed) {
             Map<String, Object> m = new HashMap<>();
             m.put("trackingNumber", r.getTrackingNumber());
             m.put("sn", r.getSn());
             m.put("field", field);
-            m.put("fromBg", normalizeColor(oldBg));
-            m.put("toBg", normalizeColor(newBg));
-            m.put("fromFont", normalizeColor(oldFg));
-            m.put("toFont", normalizeColor(newFg));
+            m.put("fromBg", normBg(oldBg));
+            m.put("toBg", normBg(newBg));
+            m.put("fromFont", normFg(oldFg));
+            m.put("toFont", normFg(newFg));
             m.put("fromStrike", bool(oldSt));
             m.put("toStrike", bool(newStrike));
             out.add(m);
